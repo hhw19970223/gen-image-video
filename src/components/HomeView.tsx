@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import RecentTaskCard from './RecentTaskCard';
 import type { AspectRatio, MotionType, Style } from '@/lib/types';
 import type { HomeStats, SerializedTask } from '@/lib/api-types';
@@ -93,6 +93,8 @@ interface ConfirmedPlan {
 
 export default function HomeView({ tasks, stats, env }: Props) {
   const router = useRouter();
+  const [wanStatus, setWanStatus] = useState(env.wan);
+  const [wanChecking, setWanChecking] = useState(!env.wan.ready);
   const [prompt, setPrompt] = useState('一瓶冷调香水在丝绸背景上缓慢旋转,顶光从左前方打入,镜头由远推近');
   const [ratio, setRatio] = useState<AspectRatio>('9:16');
   const [duration, setDuration] = useState(6);
@@ -104,6 +106,30 @@ export default function HomeView({ tasks, stats, env }: Props) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const frames = duration;
+
+  useEffect(() => {
+    let alive = true;
+
+    const refreshWanStatus = () => {
+      fetch('/api/health')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (alive && data?.wan) setWanStatus(data.wan);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (alive) setWanChecking(false);
+        });
+    };
+
+    refreshWanStatus();
+    const timer = window.setInterval(refreshWanStatus, 10_000);
+
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const taskPayload = useCallback(() => ({
     prompt: prompt.trim(),
@@ -142,8 +168,12 @@ export default function HomeView({ tasks, stats, env }: Props) {
   const confirmGenerate = useCallback(async () => {
     if (!plan) return;
     setErr(null);
-    if (!env.wan.ready) {
-      setErr(`Wan 直接生成后端未就绪: ${env.wan.error ?? '请配置 Python / CUDA / diffusers 环境'}`);
+    if (wanChecking) {
+      setErr('Wan 直接生成后端正在检测中,请稍等几秒后再开始生成');
+      return;
+    }
+    if (!wanStatus.ready) {
+      setErr(`Wan 直接生成后端未就绪: ${wanStatus.error ?? '请配置 Python / CUDA / diffusers 环境'}`);
       return;
     }
     setBusy(true);
@@ -160,7 +190,7 @@ export default function HomeView({ tasks, stats, env }: Props) {
       setErr((e as Error).message);
       setBusy(false);
     }
-  }, [env.wan.error, env.wan.ready, plan, router, taskPayload]);
+  }, [plan, router, taskPayload, wanChecking, wanStatus.error, wanStatus.ready]);
 
   const uploadReferences = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
@@ -419,8 +449,10 @@ export default function HomeView({ tasks, stats, env }: Props) {
             {references.length > 0 && <span>已上传 {references.length} 张参考图,第 1 张作为主锚定图</span>}
             <span className="grow" />
             <span>
-              {env.wan.ready
-                ? `🟢 Wan 直接生成已就绪 (${env.wan.modelId})`
+              {wanStatus.ready
+                ? `🟢 Wan 直接生成已就绪 (${wanStatus.modelId})`
+                : wanChecking
+                  ? `🟡 Wan 直接生成检测中`
                 : `🟡 Wan 直接生成待配置`}
             </span>
             <span style={{ marginLeft: 12 }}>
@@ -498,7 +530,7 @@ export default function HomeView({ tasks, stats, env }: Props) {
         <div className="info-cell">
           <div className="label">外部服务</div>
           <div className="value" style={{ display: 'flex', gap: 8, fontSize: 14, fontWeight: 500 }}>
-            <span className={`badge ${env.wan.ready ? 'badge-success' : 'badge-warn'}`}><span className="badge-dot" />Wan</span>
+            <span className={`badge ${wanStatus.ready ? 'badge-success' : 'badge-warn'}`}><span className="badge-dot" />Wan{wanChecking && ' 检测中'}</span>
             <span className={`badge ${env.codex ? 'badge-success' : 'badge-warn'}`}><span className="badge-dot" />Codex</span>
           </div>
           <div className="value-sub">FFmpeg · 本地</div>
