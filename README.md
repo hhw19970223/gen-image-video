@@ -13,7 +13,7 @@ The project no longer uses the Diffusers `WanPipeline` worker. Wan generation is
 - Node.js 20+
 - FFmpeg, or the bundled `ffmpeg-static` package
 - Codex CLI, optional but recommended
-- ComfyUI running on `http://127.0.0.1:8188`
+- ComfyUI under `vendor/ComfyUI`, running on `http://127.0.0.1:8188`
 - ComfyUI custom nodes:
   - `calcuis/gguf`
   - `ComfyUI-VideoHelperSuite` is optional for extra video utilities; the default workflow uses ComfyUI's built-in `SaveWEBM` node.
@@ -21,46 +21,46 @@ The project no longer uses the Diffusers `WanPipeline` worker. Wan generation is
 
 ## Install ComfyUI
 
-This app does not bundle ComfyUI. Install and run ComfyUI as a separate service, then point `COMFYUI_URL` to it.
+This app expects ComfyUI to live inside this repository at:
+
+```text
+vendor/ComfyUI
+```
+
+Keep ComfyUI in this folder so the app, model files, startup scripts, and logs stay under one deployable project directory.
 
 ### Option A: Windows Portable
 
 For Windows, the portable package is the simplest setup:
 
 1. Download the ComfyUI Windows portable package from the official ComfyUI release/download page.
-2. Extract it, for example to `D:\agent\ComfyUI`.
-3. Start GPU mode with `run_nvidia_gpu.bat`, or CPU mode with `run_cpu.bat`.
+2. Extract it to `vendor\ComfyUI`.
+3. Start it through this project's npm scripts.
 4. Open `http://127.0.0.1:8188` and confirm the ComfyUI page loads.
-
-If the portable bat file uses a different host or port, edit the bat file and add:
-
-```bat
---listen 127.0.0.1 --port 8188
-```
 
 ### Option B: Manual Git Install
 
 Manual install is useful when you want full control over Python, CUDA, or custom nodes:
 
 ```powershell
-git clone https://github.com/Comfy-Org/ComfyUI.git D:\agent\ComfyUI
-cd D:\agent\ComfyUI
+git clone https://github.com/Comfy-Org/ComfyUI.git vendor\ComfyUI
+cd vendor\ComfyUI
 python -m venv .venv
 .\.venv\Scripts\activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Start with GPU:
+Start from the app root with GPU:
 
 ```powershell
-python main.py --listen 127.0.0.1 --port 8188
+npm run comfyui:gpu
 ```
 
-Start with CPU:
+Start from the app root with CPU:
 
 ```powershell
-python main.py --listen 127.0.0.1 --port 8188 --cpu
+npm run comfyui:cpu
 ```
 
 CPU mode is supported only when this app has `COMFYUI_ALLOW_CPU=true`.
@@ -81,7 +81,7 @@ SaveWEBM
 Install the `calcuis/gguf` custom node into ComfyUI:
 
 ```powershell
-cd D:\agent\ComfyUI\custom_nodes
+cd vendor\ComfyUI\custom_nodes
 git clone https://github.com/calcuis/gguf.git
 ```
 
@@ -98,15 +98,15 @@ If the response says ComfyUI is missing `LoaderGGUF`, `ClipLoaderGGUF`, or `VaeG
 In ComfyUI, "checkpoint" usually means a Stable Diffusion or SDXL `.safetensors` / `.ckpt` model placed in:
 
 ```text
-ComfyUI/models/checkpoints
+vendor/ComfyUI/models/checkpoints
 ```
 
 This project does not currently use a normal SD/SDXL checkpoint. It uses a Wan video GGUF workflow instead:
 
 ```text
-ComfyUI/models/diffusion_models/wan2.1_t2v_1.3b-q2_k.gguf
-ComfyUI/models/text_encoders/umt5-xxl-encoder-q4_k_m.gguf
-ComfyUI/models/vae/pig_wan_vae_fp32-f16.gguf
+vendor/ComfyUI/models/diffusion_models/wan2.1_t2v_1.3b-q2_k.gguf
+vendor/ComfyUI/models/text_encoders/umt5-xxl-encoder-q4_k_m.gguf
+vendor/ComfyUI/models/vae/pig_wan_vae_fp32-f16.gguf
 ```
 
 So there is no `COMFYUI_CHECKPOINT` setting in `.env.local`. The equivalent model settings for this project are:
@@ -117,7 +117,7 @@ COMFYUI_WAN_CLIP=umt5-xxl-encoder-q4_k_m.gguf
 COMFYUI_WAN_VAE=pig_wan_vae_fp32-f16.gguf
 ```
 
-If you later add a Stable Diffusion image workflow, put the SD/SDXL checkpoint in `ComfyUI/models/checkpoints` and add a separate ComfyUI workflow/adapter for that pipeline.
+If you later add a Stable Diffusion image workflow, put the SD/SDXL checkpoint in `vendor/ComfyUI/models/checkpoints` and add a separate ComfyUI workflow/adapter for that pipeline.
 
 ## Install App
 
@@ -149,15 +149,15 @@ powershell -ExecutionPolicy Bypass -File scripts\download-wan-gguf.ps1
 Then copy them into ComfyUI:
 
 ```text
-ComfyUI/models/diffusion_models/wan2.1_t2v_1.3b-q2_k.gguf
-ComfyUI/models/text_encoders/umt5-xxl-encoder-q4_k_m.gguf
-ComfyUI/models/vae/pig_wan_vae_fp32-f16.gguf
+vendor/ComfyUI/models/diffusion_models/wan2.1_t2v_1.3b-q2_k.gguf
+vendor/ComfyUI/models/text_encoders/umt5-xxl-encoder-q4_k_m.gguf
+vendor/ComfyUI/models/vae/pig_wan_vae_fp32-f16.gguf
 ```
 
 Or let the helper script copy them:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\download-wan-gguf.ps1 -ComfyUIDir D:\path\to\ComfyUI
+powershell -ExecutionPolicy Bypass -File scripts\download-wan-gguf.ps1 -ComfyUIDir .\vendor\ComfyUI
 ```
 
 ## Configuration
@@ -176,8 +176,8 @@ COMFYUI_OUTPUT_FPS=
 COMFYUI_POLL_TIMEOUT_MS=86400000
 COMFYUI_POLL_INTERVAL_MS=2000
 COMFYUI_REQUEST_TIMEOUT_MS=30000
-COMFYUI_STALL_TIMEOUT_MS=86400000
-COMFYUI_ALLOW_CPU=false
+COMFYUI_STALL_TIMEOUT_MS=600000
+COMFYUI_ALLOW_CPU=true
 COMFYUI_SAMPLER=uni_pc
 COMFYUI_SCHEDULER=simple
 COMFYUI_WEBM_CODEC=vp9
@@ -203,33 +203,42 @@ FFMPEG_MOTION_INTENSITY=1.35
 NEXT_PUBLIC_APP_NAME=Frame
 ```
 
-`WAN_WIDTH` and `WAN_HEIGHT` are intentionally blank by default; the ComfyUI workflow uses the task size selected in the UI. `COMFYUI_OUTPUT_FPS` is also blank by default so the output duration is derived from `WAN_VIDEO_FRAMES / task duration`. `COMFYUI_POLL_TIMEOUT_MS` and `COMFYUI_STALL_TIMEOUT_MS` are set to 24 hours for slow CPU-only Wan runs.
+`WAN_WIDTH` and `WAN_HEIGHT` are intentionally blank by default; the ComfyUI workflow uses the task size selected in the UI. `COMFYUI_OUTPUT_FPS` is also blank by default so the output duration is derived from `WAN_VIDEO_FRAMES / task duration`. `COMFYUI_POLL_TIMEOUT_MS` is the whole job wait limit. `COMFYUI_STALL_TIMEOUT_MS` is the no-sampler-progress limit.
 
-For better quality, replace `COMFYUI_WAN_MODEL` with a larger GGUF such as `wan2.1_t2v_1.3b-q3_k_m.gguf` or `wan2.1_t2v_1.3b-q4_0.gguf`, then place that file in `ComfyUI/models/diffusion_models`.
+For better quality, replace `COMFYUI_WAN_MODEL` with a larger GGUF such as `wan2.1_t2v_1.3b-q3_k_m.gguf` or `wan2.1_t2v_1.3b-q4_0.gguf`, then place that file in `vendor/ComfyUI/models/diffusion_models`.
 
 Deployment notes for important variables:
 
-- `COMFYUI_ALLOW_CPU=false` blocks CPU-only ComfyUI because Wan generation can run for many hours. Set it to `true` only when you intentionally want to run on CPU.
-- `COMFYUI_POLL_TIMEOUT_MS` is the whole ComfyUI job wait limit. `COMFYUI_STALL_TIMEOUT_MS` is the no-sampler-progress limit. Both default to 24 hours in this project.
+- `COMFYUI_ALLOW_CPU=true` allows CPU-only ComfyUI. This is useful for local smoke tests, but Wan video generation can still take a very long time.
+- `COMFYUI_POLL_TIMEOUT_MS` is the whole ComfyUI job wait limit. `COMFYUI_STALL_TIMEOUT_MS` is the no-sampler-progress limit.
 - `CODEX_THREAD_ID` lets the app bind to a stable Codex conversation for the built-in Codex chat page. Leave it blank to let the app create and store task-level session ids.
 - `DATA_DIR` contains SQLite data, uploads, generated videos, cache files, and logs. Back it up before redeploying or moving machines.
 - `FFMPEG_BIN` can be left blank when `ffmpeg-static` works. Set it to an absolute FFmpeg executable path if deployment cannot find FFmpeg.
 
 ## Start ComfyUI
 
-Start ComfyUI separately before creating tasks:
+Start ComfyUI from the app root before creating tasks.
 
-```bash
-python main.py --listen 127.0.0.1 --port 8188 --cpu
+CPU mode:
+
+```powershell
+npm run comfyui:cpu
 ```
 
-For GPU deployment, install a CUDA-enabled PyTorch build for ComfyUI and start without `--cpu`:
+GPU mode:
 
-```bash
-python main.py --listen 127.0.0.1 --port 8188
+```powershell
+npm run comfyui:gpu
 ```
 
-If you keep `--cpu`, set this in `.env.local` before starting the Next.js service:
+The helper script uses `vendor\ComfyUI\.venv\Scripts\python.exe` and logs to:
+
+```text
+data/comfyui.out.log
+data/comfyui.err.log
+```
+
+If you use CPU mode, keep this in `.env.local` before starting the Next.js service:
 
 ```env
 COMFYUI_ALLOW_CPU=true
@@ -283,27 +292,27 @@ Edit `.env.local` before starting the service. At minimum confirm:
 
 ### 2. Prepare ComfyUI
 
-Install the GGUF custom node in ComfyUI, then place the model files here:
+Install the GGUF custom node in `vendor/ComfyUI`, then place the model files here:
 
 ```text
-ComfyUI/models/diffusion_models/wan2.1_t2v_1.3b-q2_k.gguf
-ComfyUI/models/text_encoders/umt5-xxl-encoder-q4_k_m.gguf
-ComfyUI/models/vae/pig_wan_vae_fp32-f16.gguf
+vendor/ComfyUI/models/diffusion_models/wan2.1_t2v_1.3b-q2_k.gguf
+vendor/ComfyUI/models/text_encoders/umt5-xxl-encoder-q4_k_m.gguf
+vendor/ComfyUI/models/vae/pig_wan_vae_fp32-f16.gguf
 ```
 
 Start ComfyUI:
 
-```bash
-python main.py --listen 127.0.0.1 --port 8188
+```powershell
+npm run comfyui:gpu
 ```
 
 CPU-only fallback:
 
-```bash
-python main.py --listen 127.0.0.1 --port 8188 --cpu
+```powershell
+npm run comfyui:cpu
 ```
 
-When using CPU-only fallback, keep `COMFYUI_ALLOW_CPU=true` and keep the 24-hour poll/stall timeouts.
+When using CPU-only fallback, keep `COMFYUI_ALLOW_CPU=true`. Expect Wan generation to be slow.
 
 ### 3. Start Next.js
 

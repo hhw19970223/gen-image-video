@@ -7,6 +7,8 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
+    "comfyui:cpu": "powershell -ExecutionPolicy Bypass -File scripts/start-comfyui.ps1",
+    "comfyui:gpu": "powershell -ExecutionPolicy Bypass -File scripts/start-comfyui.ps1 -Gpu",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "init-db": "tsx src/lib/init-db.ts"
