@@ -1,0 +1,791 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Frame · 创作台</title>
+<link rel="stylesheet" href="assets/app.css" />
+<style>
+  /* ====== Page-specific ====== */
+  main { max-width: var(--max-w); margin: 0 auto; padding: 36px var(--gutter) 64px; }
+
+  /* Hero */
+  .hero {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 32px;
+    padding: 28px 0 12px;
+  }
+  .hero-head {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    align-items: end;
+    gap: 32px;
+  }
+  .hero h1 {
+    font-size: clamp(36px, 4.6vw, 56px);
+    line-height: 1.02;
+    letter-spacing: -0.025em;
+    font-weight: 600;
+  }
+  .hero h1 em {
+    font-style: normal;
+    background: linear-gradient(120deg, var(--accent) 20%, var(--violet) 80%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero-sub {
+    color: var(--muted);
+    font-size: 14.5px;
+    max-width: 420px;
+    line-height: 1.6;
+  }
+  .hero-stats {
+    display: flex; gap: 24px;
+    border-left: 1px solid var(--border);
+    padding-left: 24px;
+  }
+  .stat-num {
+    font-family: var(--font-display);
+    font-size: 26px; font-weight: 600;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-label {
+    font-size: 11.5px; color: var(--muted);
+    margin-top: 2px;
+  }
+
+  /* Composer */
+  .composer {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-xl);
+    box-shadow:
+      0 1px 0 var(--surface),
+      0 12px 40px -16px oklch(50% 0.05 250 / 0.18);
+    overflow: hidden;
+    position: relative;
+  }
+  .composer::before{
+    content:""; position:absolute; inset:-1px;
+    background: linear-gradient(150deg, oklch(58% 0.18 255 / 0.10), transparent 40%, oklch(60% 0.18 295 / 0.06));
+    pointer-events:none;
+    border-radius: var(--r-xl);
+  }
+  .composer-inner { position: relative; z-index: 1; padding: 18px 18px 12px; }
+  .composer textarea {
+    width: 100%;
+    min-height: 88px;
+    border: 0;
+    background: transparent;
+    resize: none;
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--fg);
+    outline: 0;
+    padding: 4px 4px 0;
+  }
+  .composer textarea::placeholder { color: var(--muted-2); }
+
+  .composer-tools {
+    display: flex; align-items: center; gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+  }
+  .composer-tools .divider { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
+  .composer-tools .grow { flex: 1; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 30px; padding: 0 10px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--fg-soft);
+    font-size: 12.5px;
+    font-weight: 500;
+    transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  }
+  .chip:hover { background: var(--bg-subtle); border-color: var(--border-strong); color: var(--fg); }
+  .chip svg { width: 14px; height: 14px; }
+  .chip.is-active { background: var(--accent-soft); border-color: oklch(86% 0.06 255); color: oklch(35% 0.16 255); }
+  .chip-cluster {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    border-radius: var(--r-pill);
+    padding: 2px;
+    gap: 0;
+    height: 30px;
+  }
+  .chip-cluster button {
+    border: 0; background: transparent;
+    height: 26px; padding: 0 10px;
+    border-radius: var(--r-pill);
+    font-size: 12.5px; color: var(--muted);
+    font-weight: 500;
+  }
+  .chip-cluster button.is-active {
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: 0 1px 2px oklch(40% 0.03 250 / 0.08);
+  }
+
+  .composer-foot {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--surface-2);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .composer-foot kbd {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+  .composer-foot .grow { flex: 1; }
+
+  /* Templates */
+  .section-head {
+    display: flex; align-items: end; justify-content: space-between;
+    margin: 56px 0 18px;
+    gap: 16px;
+  }
+  .section-head h2 {
+    font-size: 20px;
+    letter-spacing: -0.015em;
+  }
+  .section-head .sub {
+    font-size: 13px; color: var(--muted);
+    margin-top: 4px;
+  }
+  .section-head .actions { display: flex; gap: 8px; }
+
+  .templates {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .tpl {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: 14px;
+    transition: border-color var(--t-base) var(--ease), transform var(--t-base) var(--ease);
+    cursor: pointer;
+    display: flex; flex-direction: column; gap: 12px;
+    text-align: left;
+  }
+  .tpl:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+  .tpl-thumb {
+    border-radius: var(--r-md);
+    overflow: hidden;
+    aspect-ratio: 16 / 9;
+    border: 1px solid var(--border);
+    position: relative;
+  }
+  .tpl-meta {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .tpl-meta .ratio { font-family: var(--font-mono); font-size: 11px; }
+  .tpl-title {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--fg);
+  }
+  .tpl-desc {
+    font-size: 12.5px; color: var(--muted);
+    line-height: 1.55;
+  }
+
+  /* Recent works */
+  .recents {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  .recent {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color var(--t-base) var(--ease);
+  }
+  .recent:hover { border-color: var(--border-strong); }
+  .recent-thumb {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    background: var(--bg-subtle);
+    border-bottom: 1px solid var(--border);
+  }
+  .recent-thumb-overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: oklch(20% 0.02 250 / 0.0);
+    transition: background var(--t-fast) var(--ease);
+  }
+  .recent:hover .recent-thumb-overlay { background: oklch(20% 0.02 250 / 0.4); }
+  .play-btn {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: oklch(100% 0 0 / 0.92);
+    border: 0;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0;
+    transition: opacity var(--t-fast) var(--ease);
+    color: var(--fg);
+  }
+  .recent:hover .play-btn { opacity: 1; }
+  .play-btn svg { width: 14px; height: 14px; margin-left: 2px; }
+
+  .recent-info { padding: 12px 12px 14px; }
+  .recent-title {
+    font-size: 13.5px; font-weight: 500;
+    letter-spacing: -0.005em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .recent-meta {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 8px;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .recent-meta .grow { flex: 1; }
+  .progress-track {
+    height: 3px;
+    background: var(--bg-subtle);
+    border-radius: var(--r-pill);
+    overflow: hidden;
+  }
+  .progress-bar { height: 100%; background: var(--accent); border-radius: inherit; transition: width 0.4s var(--ease); }
+
+  /* Bottom info strip */
+  .info-strip {
+    margin-top: 56px;
+    padding: 18px 22px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background:
+      radial-gradient(1100px 220px at 90% -50%, oklch(94% 0.03 255), transparent 60%),
+      var(--surface-2);
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+  }
+  .info-cell .label {
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .info-cell .value {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.018em;
+    font-variant-numeric: tabular-nums;
+  }
+  .info-cell .value-sub {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .delta-up   { color: oklch(45% 0.13 152); }
+  .delta-down { color: oklch(45% 0.16 25); }
+
+  /* Visual placeholders — keyframe-style gradients */
+  .vis-1 { background:
+    radial-gradient(circle at 30% 35%, oklch(78% 0.10 35) 0%, transparent 55%),
+    radial-gradient(circle at 75% 70%, oklch(72% 0.16 320) 0%, transparent 60%),
+    linear-gradient(135deg, oklch(96% 0.02 250), oklch(88% 0.04 280));
+  }
+  .vis-2 { background:
+    radial-gradient(circle at 50% 50%, oklch(96% 0.04 80), oklch(86% 0.06 60) 50%, oklch(72% 0.10 50) 100%);
+    position: relative;
+  }
+  .vis-2::after {
+    content:""; position:absolute; inset: 30% 35% 30% 35%;
+    background: linear-gradient(180deg, oklch(95% 0.04 80), oklch(75% 0.10 55));
+    border-radius: 8px 8px 14px 14px;
+    box-shadow: 0 14px 30px -10px oklch(40% 0.10 50 / 0.4);
+  }
+  .vis-3 { background:
+    linear-gradient(135deg, oklch(72% 0.14 195), oklch(80% 0.10 220) 50%, oklch(94% 0.04 255));
+  }
+  .vis-3::after {
+    content:""; position:absolute; inset:0;
+    background:
+      radial-gradient(circle at 25% 30%, oklch(100% 0 0 / 0.7) 0%, transparent 25%),
+      radial-gradient(circle at 70% 75%, oklch(100% 0 0 / 0.5) 0%, transparent 20%);
+  }
+  .vis-4 { background:
+    linear-gradient(45deg, oklch(34% 0.04 295), oklch(56% 0.18 295) 50%, oklch(72% 0.16 320));
+  }
+  .vis-4::after {
+    content:""; position:absolute; inset:0;
+    background: radial-gradient(circle at 50% 50%, oklch(100% 0 0 / 0.25) 0%, transparent 35%);
+  }
+  .vis-5 { background:
+    linear-gradient(180deg, oklch(94% 0.02 250), oklch(82% 0.04 250));
+  }
+  .vis-5::after {
+    content:""; position:absolute; inset: 18% 30% 8% 30%;
+    background: linear-gradient(180deg, oklch(58% 0.08 25), oklch(38% 0.10 25));
+    border-radius: 24px 24px 6px 6px;
+    box-shadow: 0 12px 24px -8px oklch(30% 0.08 25 / 0.4);
+  }
+  .vis-6 { background:
+    radial-gradient(circle at 40% 40%, oklch(82% 0.10 50), oklch(72% 0.14 30) 60%, oklch(45% 0.14 25));
+  }
+  .vis-6::after {
+    content:""; position:absolute; inset:0;
+    background:
+      radial-gradient(circle at 30% 30%, oklch(100% 0 0 / 0.4) 0%, transparent 18%),
+      radial-gradient(circle at 60% 50%, oklch(100% 0 0 / 0.3) 0%, transparent 14%),
+      radial-gradient(circle at 75% 70%, oklch(100% 0 0 / 0.25) 0%, transparent 12%);
+  }
+  .vis-7 { background:
+    linear-gradient(160deg, oklch(28% 0.04 250), oklch(48% 0.10 240) 50%, oklch(72% 0.10 220));
+  }
+  .vis-7::after {
+    content:""; position:absolute; inset:0;
+    background-image:
+      linear-gradient(0deg, oklch(100% 0 0 / 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, oklch(100% 0 0 / 0.06) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .vis-8 { background:
+    linear-gradient(135deg, oklch(48% 0.20 25), oklch(72% 0.14 50) 70%, oklch(92% 0.06 80));
+  }
+  .vis-9 { background:
+    linear-gradient(180deg, oklch(94% 0.02 220), oklch(80% 0.06 200) 60%, oklch(72% 0.12 195));
+  }
+  .vis-9::after {
+    content:""; position:absolute; inset: 25% 25% 10% 25%;
+    background: linear-gradient(180deg, oklch(45% 0.14 195), oklch(38% 0.16 220));
+    border-radius: 12px;
+    box-shadow: 0 18px 30px -10px oklch(30% 0.10 200 / 0.4);
+  }
+  .vis-10 { background:
+    radial-gradient(circle at 50% 60%, oklch(94% 0.03 95), oklch(82% 0.08 70) 60%, oklch(58% 0.14 50));
+  }
+  .vis-empty { background:
+    repeating-linear-gradient(45deg, oklch(96% 0.005 250) 0 10px, oklch(94% 0.005 250) 10px 20px);
+  }
+  .thumb-content { position: relative; }
+
+  /* Empty state for failed */
+  .recent-thumb.is-failed {
+    background:
+      linear-gradient(135deg, oklch(94% 0.02 25), oklch(88% 0.06 25));
+  }
+  .recent-thumb.is-failed::before {
+    content:""; position: absolute; inset:0;
+    background-image:
+      repeating-linear-gradient(45deg, transparent 0 14px, oklch(70% 0.10 25 / 0.15) 14px 16px);
+  }
+
+  /* Generating overlay shimmer */
+  .recent-thumb.is-generating {
+    background: linear-gradient(120deg, oklch(94% 0.02 250), oklch(88% 0.04 250) 50%, oklch(94% 0.02 250));
+    background-size: 200% 100%;
+    animation: shimmer 2.4s linear infinite;
+  }
+  @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+  /* Status strip on recent thumbs */
+  .recent-status {
+    position: absolute; left: 10px; top: 10px;
+    z-index: 1;
+  }
+  .recent-duration {
+    position: absolute; right: 10px; bottom: 10px;
+    background: oklch(20% 0.02 250 / 0.78);
+    color: white;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: var(--r-xs);
+    z-index: 1;
+  }
+
+  /* Responsive */
+  @media (max-width: 1100px) {
+    .templates { grid-template-columns: repeat(2, 1fr); }
+    .recents { grid-template-columns: repeat(2, 1fr); }
+    .info-strip { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 760px) {
+    .hero-head { grid-template-columns: 1fr; align-items: start; }
+    .hero-stats { border-left: 0; padding-left: 0; border-top: 1px solid var(--border); padding-top: 16px; }
+    .hero h1 { font-size: clamp(30px, 8vw, 38px); }
+    .templates { grid-template-columns: 1fr; }
+    .nav-links, .search-mini { display: none; }
+    .info-strip { grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ====== Top Nav ====== -->
+<header class="topnav">
+  <div class="topnav-inner">
+    <a class="brand" href="index.html" aria-label="Frame home">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>Frame</span>
+    </a>
+    <nav class="nav-links" aria-label="主导航">
+      <a class="nav-link is-active" href="index.html">创作</a>
+      <a class="nav-link" href="workspace.html">工作台</a>
+      <a class="nav-link" href="preview.html">最近预览</a>
+      <a class="nav-link" href="#">模板</a>
+      <a class="nav-link" href="#">文档</a>
+    </nav>
+    <span class="nav-spacer"></span>
+    <div class="search-mini" role="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <span>搜索任务、关键帧、模板…</span>
+      <kbd>⌘ K</kbd>
+    </div>
+    <button class="btn btn-sm">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 9 9l-7 1 5 5-1 7 6-3 6 3-1-7 5-5-7-1z"/></svg>
+      升级 Pro
+    </button>
+    <span class="avatar" title="苏小棠">S</span>
+  </div>
+</header>
+
+<main>
+  <!-- ====== Hero ====== -->
+  <section class="hero">
+    <div class="hero-head">
+      <div>
+        <span class="eyebrow">创作台 · 2026/05/26</span>
+        <h1 style="margin-top:14px">把一句话<br/>变成一段<em>会动的故事</em>。</h1>
+        <p class="hero-sub" style="margin-top:14px">
+          关键帧生成 + 简单动画 + 插帧合成。
+          普通笔记本也能跑的 AI 短视频工作流,
+          先生图、再动起来,缓存复用降低 80% 重复成本。
+        </p>
+      </div>
+      <div class="hero-stats">
+        <div>
+          <div class="stat-num tab-num">1,284</div>
+          <div class="stat-label">本月已生成视频</div>
+        </div>
+        <div>
+          <div class="stat-num tab-num">82%</div>
+          <div class="stat-label">缓存命中率</div>
+        </div>
+        <div>
+          <div class="stat-num tab-num">¥0.43</div>
+          <div class="stat-label">平均单条成本</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Composer -->
+    <form class="composer" onsubmit="event.preventDefault(); goWorkspace();">
+      <div class="composer-inner">
+        <textarea
+          id="prompt"
+          placeholder="描述一段视频…例如:一瓶冷调香水在丝绸背景上缓慢旋转,顶光从左前方打入,镜头由远推近,9:16 竖版"
+        >一瓶冷调香水在丝绸背景上缓慢旋转,顶光从左前方打入,镜头由远推近</textarea>
+        <div class="composer-tools">
+          <button type="button" class="chip" title="上传参考图">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg>
+            参考图
+          </button>
+          <div class="chip-cluster" role="tablist" aria-label="比例">
+            <button type="button" class="is-active" data-ratio="9:16">9 : 16</button>
+            <button type="button" data-ratio="16:9">16 : 9</button>
+            <button type="button" data-ratio="1:1">1 : 1</button>
+          </div>
+          <div class="chip-cluster" role="tablist" aria-label="时长">
+            <button type="button" data-duration="5">5 s</button>
+            <button type="button" class="is-active" data-duration="6">6 s</button>
+            <button type="button" data-duration="8">8 s</button>
+            <button type="button" data-duration="10">10 s</button>
+          </div>
+          <button type="button" class="chip" title="风格">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18"/></svg>
+            产品摄影
+          </button>
+          <button type="button" class="chip" title="运动">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            推近
+          </button>
+          <button type="button" class="chip" title="高级">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            高级
+          </button>
+          <span class="grow"></span>
+          <button type="submit" class="btn btn-accent btn-lg">
+            生成视频
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="composer-foot">
+        <span>预计生成 <strong class="tab-num" style="color:var(--fg)">6</strong> 张关键帧 · <span class="tab-num">24fps</span> · 720p · 估时 <span class="tab-num">~58s</span></span>
+        <span class="grow"></span>
+        <span>缓存匹配 <strong class="tab-num" style="color:var(--success)">3 / 6</strong> 帧</span>
+        <span style="margin-left: 12px"><kbd>⌘</kbd> + <kbd>⏎</kbd> 提交</span>
+      </div>
+    </form>
+  </section>
+
+  <!-- ====== Templates ====== -->
+  <section>
+    <div class="section-head">
+      <div>
+        <h2>模板灵感</h2>
+        <div class="sub">从场景出发,几秒钟就能出第一稿。所有模板都可在工作台二次编辑。</div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-sm">全部模板</button>
+      </div>
+    </div>
+
+    <div class="templates">
+      <button class="tpl">
+        <div class="tpl-thumb"><div class="thumb-content vis-2"></div></div>
+        <div>
+          <div class="tpl-meta">
+            <span>商品 · 美妆 / 香氛</span>
+            <span class="ratio">9:16</span>
+          </div>
+          <div class="tpl-title" style="margin-top:6px">香氛瓶 360° 旋转特写</div>
+          <div class="tpl-desc" style="margin-top:6px">8 关键帧、镜头自旋 + 推近,适合电商详情页头图视频。</div>
+        </div>
+      </button>
+
+      <button class="tpl">
+        <div class="tpl-thumb"><div class="thumb-content vis-1"></div></div>
+        <div>
+          <div class="tpl-meta">
+            <span>电商 · 服装 / 平铺到上身</span>
+            <span class="ratio">1:1</span>
+          </div>
+          <div class="tpl-title" style="margin-top:6px">平铺图 → 上身演绎</div>
+          <div class="tpl-desc" style="margin-top:6px">两张关键帧交叉溶解,小红书首图节奏,自动加圆角。</div>
+        </div>
+      </button>
+
+      <button class="tpl">
+        <div class="tpl-thumb"><div class="thumb-content vis-6"></div></div>
+        <div>
+          <div class="tpl-meta">
+            <span>美食 · 流体特写</span>
+            <span class="ratio">9:16</span>
+          </div>
+          <div class="tpl-title" style="margin-top:6px">饮品倾倒慢镜头</div>
+          <div class="tpl-desc" style="margin-top:6px">6 关键帧 + 插帧,液体下落顺滑,TikTok / 抖音节奏。</div>
+        </div>
+      </button>
+
+      <button class="tpl">
+        <div class="tpl-thumb"><div class="thumb-content vis-4"></div></div>
+        <div>
+          <div class="tpl-meta">
+            <span>科技 / 数码 · 开箱节奏</span>
+            <span class="ratio">16:9</span>
+          </div>
+          <div class="tpl-title" style="margin-top:6px">数码产品开箱光影</div>
+          <div class="tpl-desc" style="margin-top:6px">深紫调 + 高光扫过,4 关键帧节奏,B 站 / YouTube 头图。</div>
+        </div>
+      </button>
+
+      <button class="tpl">
+        <div class="tpl-thumb"><div class="thumb-content vis-3"></div></div>
+        <div>
+          <div class="tpl-meta">
+            <span>品牌 · 微动画 / 主视觉</span>
+            <span class="ratio">16:9</span>
+          </div>
+          <div class="tpl-title" style="margin-top:6px">品牌主视觉淡入</div>
+          <div class="tpl-desc" style="margin-top:6px">极简渐变 + 平移,适合活动页头图、Hero 视频背景。</div>
+        </div>
+      </button>
+
+      <button class="tpl">
+        <div class="tpl-thumb"><div class="thumb-content vis-5"></div></div>
+        <div>
+          <div class="tpl-meta">
+            <span>食品 · 包装即视感</span>
+            <span class="ratio">9:16</span>
+          </div>
+          <div class="tpl-title" style="margin-top:6px">包装产品摆拍 → 推近</div>
+          <div class="tpl-desc" style="margin-top:6px">6 关键帧、单点光源,适合零食 / 饮料 / 美妆陈列。</div>
+        </div>
+      </button>
+    </div>
+  </section>
+
+  <!-- ====== Recent works ====== -->
+  <section>
+    <div class="section-head">
+      <div>
+        <h2>最近作品</h2>
+        <div class="sub">本周共 <span class="tab-num">23</span> 条任务,缓存命中节省 <span class="tab-num" style="color:var(--success)">¥6.40</span>。</div>
+      </div>
+      <div class="actions">
+        <div class="chip-cluster">
+          <button class="is-active">全部</button>
+          <button>已完成</button>
+          <button>进行中</button>
+          <button>失败</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="recents">
+      <a class="recent" href="preview.html">
+        <div class="recent-thumb">
+          <div class="thumb-content vis-2"></div>
+          <span class="badge badge-success recent-status"><span class="badge-dot"></span>已完成</span>
+          <span class="recent-duration tab-num">0:06</span>
+          <span class="recent-thumb-overlay">
+            <button class="play-btn" aria-label="播放">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+          </span>
+        </div>
+        <div class="recent-info">
+          <div class="recent-title">香氛瓶冷调推进 · v3</div>
+          <div class="recent-meta">
+            <span>5 分钟前</span>
+            <span>·</span>
+            <span class="tab-num">9:16 · 6s · 24fps</span>
+            <span class="grow"></span>
+            <span class="badge badge-accent" style="height:18px;font-size:10.5px;padding:0 6px">缓存 5/6</span>
+          </div>
+        </div>
+      </a>
+
+      <a class="recent" href="workspace.html">
+        <div class="recent-thumb is-generating">
+          <span class="badge badge-warn recent-status"><span class="badge-dot"></span>合成视频中</span>
+          <div style="position:absolute;left:0;right:0;bottom:0;background:linear-gradient(180deg, transparent, oklch(20% 0.02 250 / 0.7));padding:18px 12px 10px">
+            <div class="progress-track" style="background: oklch(100% 0 0 / 0.25)">
+              <div class="progress-bar" style="width:74%; background: oklch(100% 0 0)"></div>
+            </div>
+            <div style="display:flex;color:white;font-size:11px;margin-top:6px;font-family:var(--font-mono)">
+              <span>74%</span>
+              <span style="margin-left:auto">FFmpeg · 5/8 帧</span>
+            </div>
+          </div>
+        </div>
+        <div class="recent-info">
+          <div class="recent-title">服装平铺 → 模特上身演绎</div>
+          <div class="recent-meta">
+            <span>正在合成 · 还需 ~12s</span>
+          </div>
+        </div>
+      </a>
+
+      <a class="recent" href="workspace.html">
+        <div class="recent-thumb">
+          <div class="thumb-content vis-6"></div>
+          <span class="badge badge-violet recent-status"><span class="badge-dot"></span>生成关键帧</span>
+          <div style="position:absolute;left:0;right:0;bottom:0;background:linear-gradient(180deg, transparent, oklch(20% 0.02 250 / 0.7));padding:18px 12px 10px">
+            <div class="progress-track" style="background: oklch(100% 0 0 / 0.25)">
+              <div class="progress-bar" style="width:38%; background: oklch(100% 0 0)"></div>
+            </div>
+            <div style="display:flex;color:white;font-size:11px;margin-top:6px;font-family:var(--font-mono)">
+              <span>3/8 帧</span>
+              <span style="margin-left:auto">ComfyUI · queue #2</span>
+            </div>
+          </div>
+        </div>
+        <div class="recent-info">
+          <div class="recent-title">柚子苏打倾倒慢镜</div>
+          <div class="recent-meta">
+            <span>1 分钟前</span>
+            <span>·</span>
+            <span class="tab-num">9:16 · 8s · 24fps</span>
+          </div>
+        </div>
+      </a>
+
+      <a class="recent" href="workspace.html">
+        <div class="recent-thumb is-failed">
+          <span class="badge badge-danger recent-status"><span class="badge-dot"></span>失败</span>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:oklch(40% 0.12 25);">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+          </div>
+        </div>
+        <div class="recent-info">
+          <div class="recent-title">数码产品开箱 · v2</div>
+          <div class="recent-meta">
+            <span>2 小时前 · 生图服务超时</span>
+            <span class="grow"></span>
+            <button class="btn btn-sm btn-ghost" style="height:20px;padding:0 6px;font-size:11px">重试</button>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ====== Info strip ====== -->
+  <section class="info-strip">
+    <div class="info-cell">
+      <div class="label">本月配额</div>
+      <div class="value tab-num">187 / 500</div>
+      <div class="value-sub">视频任务 · 重置于 06/01</div>
+    </div>
+    <div class="info-cell">
+      <div class="label">关键帧缓存</div>
+      <div class="value tab-num">2,431</div>
+      <div class="value-sub delta-up">↑ 18% 较上周</div>
+    </div>
+    <div class="info-cell">
+      <div class="label">平均生图耗时</div>
+      <div class="value tab-num">14.2 <span style="font-size:13px;color:var(--muted);font-weight:500">s/帧</span></div>
+      <div class="value-sub delta-down">↓ 2.1s 较上周</div>
+    </div>
+    <div class="info-cell">
+      <div class="label">外部服务</div>
+      <div class="value tab-num" style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500">
+        <span class="badge badge-success" style="height:22px"><span class="badge-dot"></span>ComfyUI</span>
+        <span class="badge badge-success" style="height:22px"><span class="badge-dot"></span>RIFE</span>
+      </div>
+      <div class="value-sub">FFmpeg 6.1 · 本地</div>
+    </div>
+  </section>
+</main>
+
+<script>
+  // chip-cluster toggle
+  document.querySelectorAll('.chip-cluster').forEach(group => {
+    group.addEventListener('click', e => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      group.querySelectorAll('button').forEach(b => b.classList.remove('is-active'));
+      btn.classList.add('is-active');
+    });
+  });
+
+  // ⌘+Enter shortcut
+  const promptEl = document.getElementById('prompt');
+  promptEl?.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') goWorkspace();
+  });
+
+  function goWorkspace() {
+    window.location.href = 'workspace.html';
+  }
+</script>
+</body>
+</html>

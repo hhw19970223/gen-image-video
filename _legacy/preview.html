@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Frame · 在线预览 · 香氛瓶冷调推进</title>
+<link rel="stylesheet" href="assets/app.css" />
+<style>
+  main { max-width: var(--max-w); margin: 0 auto; padding: 28px var(--gutter) 48px; }
+
+  /* Header strip */
+  .crumbs {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--muted);
+    margin-bottom: 14px;
+  }
+  .crumbs a { color: var(--muted); }
+  .crumbs a:hover { color: var(--fg); }
+  .crumbs svg { width: 11px; height: 11px; }
+
+  .page-head {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+  .page-head h1 {
+    font-size: clamp(24px, 2.6vw, 30px);
+    letter-spacing: -0.02em;
+    font-weight: 600;
+  }
+  .head-meta {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+  .head-meta .dot { width: 3px; height: 3px; background: var(--muted-2); border-radius: 50%; }
+  .head-actions { display: flex; gap: 8px; }
+
+  /* ====== Player layout ====== */
+  .preview-grid {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 20px;
+    align-items: start;
+  }
+
+  /* Player */
+  .player-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .player-stage {
+    background:
+      radial-gradient(800px 400px at 50% 50%, oklch(95% 0.005 250), oklch(91% 0.006 250));
+    display: flex; align-items: center; justify-content: center;
+    padding: 28px;
+    min-height: 480px;
+    position: relative;
+  }
+  .player-stage::before {
+    content:""; position: absolute; inset: 0;
+    background-image:
+      radial-gradient(circle at 15% 20%, oklch(100% 0 0 / 0.6), transparent 28%),
+      radial-gradient(circle at 85% 85%, oklch(96% 0.02 255 / 0.5), transparent 25%);
+    pointer-events: none;
+  }
+  .player-frame {
+    position: relative;
+    aspect-ratio: 9 / 16;
+    height: 480px;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow:
+      0 1px 0 oklch(100% 0 0 / 0.7) inset,
+      0 30px 80px -20px oklch(38% 0.06 250 / 0.35),
+      0 8px 28px -10px oklch(40% 0.08 250 / 0.20);
+  }
+  .player-frame .stage-img {
+    position: absolute; inset: 0;
+    transition: opacity 600ms var(--ease);
+  }
+  .player-frame .stage-img.is-active { opacity: 1; }
+  .player-frame .stage-img:not(.is-active) { opacity: 0; }
+
+  /* keyframe-shaped backgrounds */
+  .vis-perfume-1 { background: radial-gradient(circle at 50% 60%, oklch(94% 0.04 240), oklch(72% 0.06 220) 60%, oklch(40% 0.10 220)); }
+  .vis-perfume-1::after { content:""; position:absolute; inset: 35% 40% 18% 40%; background: linear-gradient(180deg, oklch(96% 0.02 220), oklch(72% 0.10 220)); border-radius: 4px 4px 8px 8px; opacity: 0.85; }
+  .vis-perfume-2 { background: radial-gradient(circle at 50% 60%, oklch(96% 0.03 240), oklch(76% 0.08 220) 50%, oklch(38% 0.12 220)); }
+  .vis-perfume-2::after { content:""; position:absolute; inset: 28% 38% 14% 38%; background: linear-gradient(180deg, oklch(98% 0.02 220), oklch(70% 0.12 220)); border-radius: 4px 4px 10px 10px; }
+  .vis-perfume-3 { background: radial-gradient(circle at 50% 55%, oklch(96% 0.03 240), oklch(74% 0.08 215) 45%, oklch(35% 0.14 220)); }
+  .vis-perfume-3::after { content:""; position:absolute; inset: 20% 36% 12% 36%; background: linear-gradient(180deg, oklch(96% 0.02 220), oklch(66% 0.14 215)); border-radius: 4px 4px 12px 12px; box-shadow: 0 8px 20px -4px oklch(30% 0.10 220 / 0.5); }
+  .vis-perfume-4 { background: radial-gradient(circle at 48% 50%, oklch(98% 0.02 240), oklch(76% 0.10 215) 40%, oklch(32% 0.16 220)); }
+  .vis-perfume-4::after { content:""; position:absolute; inset: 16% 32% 10% 32%; background: linear-gradient(180deg, oklch(98% 0.02 220), oklch(64% 0.16 215)); border-radius: 4px 4px 14px 14px; box-shadow: 0 10px 22px -4px oklch(30% 0.10 220 / 0.55); }
+  .vis-perfume-5 { background: radial-gradient(circle at 50% 50%, oklch(98% 0.02 240), oklch(78% 0.12 210) 35%, oklch(28% 0.18 220)); }
+  .vis-perfume-5::after { content:""; position:absolute; inset: 12% 28% 8% 28%; background: linear-gradient(180deg, oklch(98% 0.02 220), oklch(60% 0.18 215)); border-radius: 4px 4px 16px 16px; box-shadow: 0 12px 26px -4px oklch(28% 0.12 220 / 0.6); }
+  .vis-perfume-6 { background: radial-gradient(circle at 50% 50%, oklch(98% 0.02 240), oklch(80% 0.14 205) 30%, oklch(25% 0.20 220)); }
+  .vis-perfume-6::after { content:""; position:absolute; inset: 8% 22% 6% 22%; background: linear-gradient(180deg, oklch(98% 0.02 220), oklch(56% 0.20 215)); border-radius: 4px 4px 20px 20px; box-shadow: 0 14px 30px -4px oklch(25% 0.14 220 / 0.65); }
+
+  .stage-overlay {
+    position: absolute; inset: 0;
+    background:
+      linear-gradient(180deg, transparent 60%, oklch(20% 0.02 250 / 0.55));
+    display: flex; align-items: flex-end;
+    padding: 18px;
+    opacity: 0;
+    transition: opacity var(--t-base) var(--ease);
+  }
+  .player-card:hover .stage-overlay,
+  .player-card.is-paused .stage-overlay { opacity: 1; }
+  .stage-watermark {
+    position: absolute;
+    top: 14px; right: 14px;
+    color: oklch(100% 0 0 / 0.85);
+    font-size: 11px;
+    font-family: var(--font-mono);
+    background: oklch(20% 0.02 250 / 0.4);
+    backdrop-filter: blur(8px);
+    padding: 3px 7px;
+    border-radius: 4px;
+  }
+  .stage-time {
+    color: white;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    background: oklch(20% 0.02 250 / 0.6);
+    padding: 3px 8px;
+    border-radius: 4px;
+  }
+
+  .play-overlay-btn {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    background: oklch(100% 0 0 / 0.92);
+    border: 0;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 8px 24px oklch(20% 0.02 250 / 0.4);
+    color: var(--fg);
+    opacity: 0;
+    transition: opacity var(--t-base) var(--ease), transform var(--t-base) var(--ease);
+  }
+  .player-card.is-paused .play-overlay-btn { opacity: 1; }
+  .play-overlay-btn:hover { transform: translate(-50%, -50%) scale(1.06); }
+  .play-overlay-btn svg { width: 22px; height: 22px; margin-left: 3px; }
+  .player-card.is-paused .play-overlay-btn svg { margin-left: 4px; }
+
+  /* Player controls */
+  .controls {
+    padding: 12px 16px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .scrub {
+    position: relative;
+    height: 14px;
+    cursor: pointer;
+    display: flex; align-items: center;
+  }
+  .scrub-track {
+    height: 4px;
+    width: 100%;
+    background: var(--bg-subtle);
+    border-radius: var(--r-pill);
+    overflow: hidden;
+    position: relative;
+  }
+  .scrub-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: inherit;
+    width: 0%;
+    transition: width 80ms linear;
+  }
+  .scrub-buffered {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    width: 100%;
+    background: var(--border);
+    border-radius: inherit;
+  }
+  .scrub-thumb {
+    position: absolute;
+    top: 50%;
+    width: 12px; height: 12px;
+    background: var(--surface);
+    border: 2px solid var(--accent);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    left: 0%;
+    transition: left 80ms linear;
+    box-shadow: 0 1px 2px oklch(20% 0.02 250 / 0.2);
+  }
+  .scrub-marks {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: flex;
+  }
+  .scrub-marks > div {
+    flex: 1;
+    border-right: 1px solid var(--border);
+  }
+  .scrub-marks > div:last-child { border-right: 0; }
+
+  .controls-row {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--fg-soft);
+  }
+  .controls-row .time {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+  }
+  .controls-row .grow { flex: 1; }
+  .ctrl-btn {
+    width: 30px; height: 30px;
+    border-radius: var(--r-sm);
+    border: 0; background: transparent;
+    color: var(--fg-soft);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ctrl-btn:hover { background: var(--bg-subtle); color: var(--fg); }
+  .ctrl-btn.is-primary {
+    background: var(--fg); color: var(--surface);
+  }
+  .ctrl-btn.is-primary:hover { background: oklch(28% 0.012 250); }
+  .ctrl-btn svg { width: 14px; height: 14px; }
+  .ctrl-btn.is-primary svg { width: 12px; height: 12px; margin-left: 1px; }
+  .speed-pill {
+    height: 26px;
+    padding: 0 8px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+    background: transparent;
+    font-size: 11.5px;
+    font-family: var(--font-mono);
+    color: var(--muted);
+  }
+  .speed-pill:hover { background: var(--bg-subtle); }
+
+  /* Filmstrip */
+  .filmstrip {
+    margin-top: 18px;
+    padding: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+  }
+  .filmstrip-head {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 12px;
+  }
+  .filmstrip-head .grow { flex: 1; }
+  .filmstrip-row {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+  }
+  .film-cell {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    overflow: hidden;
+    aspect-ratio: 9 / 16;
+    cursor: pointer;
+    transition: border-color var(--t-fast) var(--ease);
+  }
+  .film-cell:hover { border-color: var(--border-strong); }
+  .film-cell.is-current {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .film-num {
+    position: absolute;
+    top: 4px; left: 4px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    background: oklch(20% 0.02 250 / 0.78);
+    color: white;
+    padding: 1px 4px;
+    border-radius: 3px;
+    z-index: 1;
+  }
+  .film-time {
+    position: absolute;
+    bottom: 4px; right: 4px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    background: oklch(20% 0.02 250 / 0.78);
+    color: white;
+    padding: 1px 4px;
+    border-radius: 3px;
+    z-index: 1;
+  }
+
+  /* ====== Right rail ====== */
+  .rail { display: flex; flex-direction: column; gap: 16px; }
+  .rail-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+  }
+  .rail-card-head {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface-2);
+    font-size: 12.5px;
+  }
+  .rail-card-head h4 {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+  .rail-card-head .grow { flex: 1; }
+  .rail-card-body { padding: 14px; }
+
+  .param-row {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 8px;
+    padding: 7px 0;
+    font-size: 12.5px;
+    border-bottom: 1px dashed var(--border);
+  }
+  .param-row:last-child { border-bottom: 0; }
+  .param-row .key { color: var(--muted); }
+  .param-row .val { color: var(--fg); }
+  .param-row .val.mono { font-family: var(--font-mono); font-size: 12px; }
+
+  .prompt-readout {
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 10px 12px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--fg-soft);
+  }
+
+  .cost-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    overflow: hidden;
+  }
+  .cost-cell {
+    background: var(--surface);
+    padding: 10px 12px;
+  }
+  .cost-cell .label {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+  .cost-cell .value {
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    font-variant-numeric: tabular-nums;
+  }
+  .cost-cell .value-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .cost-cell .value.is-saved { color: var(--success); }
+
+  /* Cache breakdown */
+  .cache-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 0;
+    font-size: 12px;
+    border-bottom: 1px dashed var(--border);
+  }
+  .cache-row:last-child { border-bottom: 0; }
+  .cache-row .grow { flex: 1; }
+  .cache-row .label { color: var(--fg-soft); }
+  .cache-bar {
+    width: 80px;
+    height: 4px;
+    background: var(--bg-subtle);
+    border-radius: var(--r-pill);
+    overflow: hidden;
+  }
+  .cache-bar > div { height: 100%; background: var(--success); border-radius: inherit; }
+  .cache-row .pct {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    width: 40px;
+    text-align: right;
+  }
+
+  /* Action footer */
+  .action-bar {
+    margin-top: 28px;
+    padding: 14px 18px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    display: flex; align-items: center; gap: 10px;
+    flex-wrap: wrap;
+  }
+  .action-bar .text {
+    font-size: 13px; color: var(--fg-soft);
+  }
+  .action-bar .text strong { color: var(--fg); }
+  .action-bar .grow { flex: 1; }
+
+  /* Responsive */
+  @media (max-width: 1100px) {
+    .preview-grid { grid-template-columns: 1fr; }
+    .rail { display: grid; grid-template-columns: repeat(2, 1fr); align-items: start; }
+  }
+  @media (max-width: 760px) {
+    .nav-links, .search-mini { display: none; }
+    .rail { grid-template-columns: 1fr; }
+    .filmstrip-row { grid-template-columns: repeat(3, 1fr); }
+    .player-stage { padding: 14px; min-height: auto; }
+    .player-frame { height: auto; width: 100%; max-width: 280px; }
+    .page-head { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topnav">
+  <div class="topnav-inner">
+    <a class="brand" href="index.html"><span class="brand-mark"></span><span>Frame</span></a>
+    <nav class="nav-links">
+      <a class="nav-link" href="index.html">创作</a>
+      <a class="nav-link" href="workspace.html">工作台</a>
+      <a class="nav-link is-active" href="preview.html">最近预览</a>
+      <a class="nav-link" href="#">模板</a>
+    </nav>
+    <span class="nav-spacer"></span>
+    <a class="btn btn-sm" href="workspace.html">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+      返工作台
+    </a>
+    <button class="btn btn-sm">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>
+      分享
+    </button>
+    <span class="avatar" title="苏小棠">S</span>
+  </div>
+</header>
+
+<main>
+
+  <div class="crumbs">
+    <a href="index.html">创作</a>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+    <a href="workspace.html">工作台</a>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+    <span style="color:var(--fg)">在线预览</span>
+  </div>
+
+  <div class="page-head">
+    <div>
+      <h1>香氛瓶冷调推进 · v3</h1>
+      <div class="head-meta">
+        <span class="badge badge-success"><span class="badge-dot"></span>已完成</span>
+        <span class="dot"></span>
+        <span class="tab-num">9 : 16 · 6.0s · 24fps · 720 × 1280</span>
+        <span class="dot"></span>
+        <span>10:18 创建 · 苏小棠</span>
+        <span class="dot"></span>
+        <span class="mono" style="font-family:var(--font-mono);font-size:11.5px;color:var(--muted)">task_2NkQ7m</span>
+      </div>
+    </div>
+    <div class="head-actions">
+      <button class="btn btn-sm">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        复制参数
+      </button>
+      <button class="btn btn-sm">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        复用参数
+      </button>
+      <button class="btn btn-sm btn-accent">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        下载 mp4 · 4.2 MB
+      </button>
+    </div>
+  </div>
+
+  <!-- ====== Preview grid ====== -->
+  <div class="preview-grid">
+
+    <!-- Player + filmstrip -->
+    <div>
+      <div class="player-card is-paused" id="player">
+        <div class="player-stage">
+          <div class="player-frame">
+            <div class="stage-img is-active vis-perfume-1" data-frame="0"></div>
+            <div class="stage-img vis-perfume-2" data-frame="1"></div>
+            <div class="stage-img vis-perfume-3" data-frame="2"></div>
+            <div class="stage-img vis-perfume-4" data-frame="3"></div>
+            <div class="stage-img vis-perfume-5" data-frame="4"></div>
+            <div class="stage-img vis-perfume-6" data-frame="5"></div>
+            <div class="stage-watermark">Frame · v3</div>
+            <button class="play-overlay-btn" id="bigPlay" aria-label="播放">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <div class="stage-overlay">
+              <span class="stage-time"><span id="ovTime">00:00</span> / 00:06</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <div class="scrub" id="scrub">
+            <div class="scrub-track">
+              <div class="scrub-buffered"></div>
+              <div class="scrub-fill" id="scrubFill"></div>
+              <div class="scrub-marks">
+                <div></div><div></div><div></div><div></div><div></div><div></div>
+              </div>
+            </div>
+            <div class="scrub-thumb" id="scrubThumb"></div>
+          </div>
+
+          <div class="controls-row">
+            <button class="ctrl-btn is-primary" id="playBtn" aria-label="播放/暂停">
+              <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <button class="ctrl-btn" aria-label="后退 1 帧">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 19 2 12 11 5 11 19" fill="currentColor"/><polygon points="22 19 13 12 22 5 22 19" fill="currentColor"/></svg>
+            </button>
+            <button class="ctrl-btn" aria-label="前进 1 帧">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 19 22 12 13 5 13 19" fill="currentColor"/><polygon points="2 19 11 12 2 5 2 19" fill="currentColor"/></svg>
+            </button>
+            <span class="time tab-num" id="timeReadout">00:00 / 00:06</span>
+            <span class="grow"></span>
+            <button class="speed-pill" id="speedBtn">1.0×</button>
+            <button class="ctrl-btn" aria-label="静音">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+            </button>
+            <button class="ctrl-btn" aria-label="画质">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button class="ctrl-btn" aria-label="全屏">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V3h4M21 7V3h-4M3 17v4h4M21 17v4h-4"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filmstrip -->
+      <div class="filmstrip">
+        <div class="filmstrip-head">
+          <span class="eyebrow">关键帧时间轴</span>
+          <span class="grow"></span>
+          <span style="font-size:11.5px;color:var(--muted);font-family:var(--font-mono)">6 关键帧 · 144 中间帧 (RIFE)</span>
+          <a class="btn btn-sm btn-ghost" href="workspace.html">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            微调单帧
+          </a>
+        </div>
+        <div class="filmstrip-row" id="filmstrip">
+          <div class="film-cell is-current" data-i="0">
+            <span class="film-num">01</span>
+            <span class="film-time tab-num">0.0s</span>
+            <div class="thumb-content vis-perfume-1" style="position:absolute;inset:0"></div>
+          </div>
+          <div class="film-cell" data-i="1">
+            <span class="film-num">02</span>
+            <span class="film-time tab-num">1.2s</span>
+            <div class="thumb-content vis-perfume-2" style="position:absolute;inset:0"></div>
+          </div>
+          <div class="film-cell" data-i="2">
+            <span class="film-num">03</span>
+            <span class="film-time tab-num">2.4s</span>
+            <div class="thumb-content vis-perfume-3" style="position:absolute;inset:0"></div>
+          </div>
+          <div class="film-cell" data-i="3">
+            <span class="film-num">04</span>
+            <span class="film-time tab-num">3.6s</span>
+            <div class="thumb-content vis-perfume-4" style="position:absolute;inset:0"></div>
+          </div>
+          <div class="film-cell" data-i="4">
+            <span class="film-num">05</span>
+            <span class="film-time tab-num">4.8s</span>
+            <div class="thumb-content vis-perfume-5" style="position:absolute;inset:0"></div>
+          </div>
+          <div class="film-cell" data-i="5">
+            <span class="film-num">06</span>
+            <span class="film-time tab-num">6.0s</span>
+            <div class="thumb-content vis-perfume-6" style="position:absolute;inset:0"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== Rail ====== -->
+    <aside class="rail">
+
+      <div class="rail-card">
+        <div class="rail-card-head">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <h4>提示词</h4>
+          <span class="grow"></span>
+          <button class="btn btn-sm btn-ghost" style="padding:0 6px;height:22px;font-size:11px">编辑</button>
+        </div>
+        <div class="rail-card-body">
+          <div class="prompt-readout">一瓶冷调香水在丝绸背景上缓慢旋转,顶光从左前方打入,镜头由远推近。冷蓝白光线,产品摄影风格,瓶身居中。</div>
+        </div>
+      </div>
+
+      <div class="rail-card">
+        <div class="rail-card-head">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <h4>参数</h4>
+        </div>
+        <div class="rail-card-body" style="padding-top:6px;padding-bottom:6px">
+          <div class="param-row"><span class="key">风格</span><span class="val">产品摄影</span></div>
+          <div class="param-row"><span class="key">运动方式</span><span class="val mono">zoom_in</span></div>
+          <div class="param-row"><span class="key">关键帧</span><span class="val mono">6 张</span></div>
+          <div class="param-row"><span class="key">FPS</span><span class="val mono">24</span></div>
+          <div class="param-row"><span class="key">分辨率</span><span class="val mono">720 × 1280</span></div>
+          <div class="param-row"><span class="key">Seed</span><span class="val mono">428917</span></div>
+          <div class="param-row"><span class="key">插帧</span><span class="val">RIFE 4.6 · 启用</span></div>
+          <div class="param-row"><span class="key">码率</span><span class="val mono">2.4 Mbps · H.264</span></div>
+          <div class="param-row"><span class="key">封面帧</span><span class="val mono">04 · 03.6s</span></div>
+        </div>
+      </div>
+
+      <div class="rail-card">
+        <div class="rail-card-head">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          <h4>缓存命中</h4>
+          <span class="grow"></span>
+          <span class="cache-pill">5 / 6 帧</span>
+        </div>
+        <div class="rail-card-body" style="padding-top:6px">
+          <div class="cache-row"><span class="label">关键帧 keyframe</span><span class="grow"></span><div class="cache-bar"><div style="width:83%"></div></div><span class="pct">5/6</span></div>
+          <div class="cache-row"><span class="label">插帧 motion_frame</span><span class="grow"></span><div class="cache-bar"><div style="width:100%"></div></div><span class="pct">144/144</span></div>
+          <div class="cache-row"><span class="label">最终视频 video</span><span class="grow"></span><div class="cache-bar"><div style="width:0%"></div></div><span class="pct">0/1</span></div>
+          <div style="margin-top:10px;padding:8px 10px;background:var(--success-soft);border:1px solid oklch(86% 0.05 152);border-radius:var(--r-sm);font-size:11.5px;color:oklch(35% 0.10 152);display:flex;align-items:center;gap:6px">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg>
+            <span>缓存节省 <strong class="tab-num">¥0.32</strong> · <strong class="tab-num">38s</strong> 重复生图。</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rail-card">
+        <div class="rail-card-head">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          <h4>耗时与成本</h4>
+        </div>
+        <div class="rail-card-body" style="padding:0">
+          <div class="cost-grid">
+            <div class="cost-cell">
+              <div class="label">总耗时</div>
+              <div class="value tab-num">52<span style="font-size:13px;color:var(--muted);font-weight:500">s</span></div>
+              <div class="value-sub">含合成 17s</div>
+            </div>
+            <div class="cost-cell">
+              <div class="label">总成本</div>
+              <div class="value tab-num">¥0.41</div>
+              <div class="value-sub">3 张新生图</div>
+            </div>
+            <div class="cost-cell">
+              <div class="label">缓存节省</div>
+              <div class="value tab-num is-saved">¥0.32</div>
+              <div class="value-sub">5 帧命中</div>
+            </div>
+            <div class="cost-cell">
+              <div class="label">输出大小</div>
+              <div class="value tab-num">4.2<span style="font-size:13px;color:var(--muted);font-weight:500">MB</span></div>
+              <div class="value-sub">H.264 · 2.4 Mbps</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+
+  </div>
+
+  <!-- Action bar -->
+  <div class="action-bar">
+    <span class="text">
+      预览满意了?可以一键<strong>复用参数</strong>生成新版本,或微调某一帧后重新合成。
+    </span>
+    <span class="grow"></span>
+    <a class="btn btn-sm" href="workspace.html">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      微调单帧
+    </a>
+    <button class="btn btn-sm">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      复用参数
+    </button>
+    <button class="btn btn-sm">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>
+      复制链接
+    </button>
+    <button class="btn btn-sm btn-accent">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      下载 mp4
+    </button>
+  </div>
+
+</main>
+
+<script>
+  // ====== Player simulator ======
+  const DURATION = 6.0; // seconds
+  const FRAMES   = 6;
+  const FRAME_AT = [0.0, 1.2, 2.4, 3.6, 4.8, 6.0];
+
+  let t = 0;
+  let playing = false;
+  let speed = 1.0;
+  let last = 0;
+  let raf = null;
+
+  const player    = document.getElementById('player');
+  const fill      = document.getElementById('scrubFill');
+  const thumb     = document.getElementById('scrubThumb');
+  const timeOut   = document.getElementById('timeReadout');
+  const ovTime    = document.getElementById('ovTime');
+  const playIcon  = document.getElementById('playIcon');
+  const speedBtn  = document.getElementById('speedBtn');
+  const stages    = document.querySelectorAll('.stage-img');
+  const filmCells = document.querySelectorAll('.film-cell');
+
+  function fmt(s) {
+    const m = Math.floor(s / 60).toString().padStart(2, '0');
+    const sc = Math.floor(s % 60).toString().padStart(2, '0');
+    return `${m}:${sc}`;
+  }
+
+  function activeFrameIndex(time) {
+    let idx = 0;
+    for (let i = 0; i < FRAME_AT.length; i++) {
+      if (time >= FRAME_AT[i] - 0.001) idx = i;
+    }
+    return idx;
+  }
+
+  function render() {
+    const pct = Math.min(100, (t / DURATION) * 100);
+    fill.style.width = pct + '%';
+    thumb.style.left = pct + '%';
+    const ts = `${fmt(t)} / 00:06`;
+    timeOut.textContent = ts;
+    ovTime.textContent = fmt(t);
+
+    const idx = activeFrameIndex(t);
+    stages.forEach((s, i) => s.classList.toggle('is-active', i === idx));
+    filmCells.forEach((c, i) => c.classList.toggle('is-current', i === idx));
+  }
+
+  function tick(now) {
+    if (!playing) return;
+    if (!last) last = now;
+    const dt = (now - last) / 1000 * speed;
+    last = now;
+    t += dt;
+    if (t >= DURATION) {
+      t = DURATION;
+      playing = false;
+      player.classList.add('is-paused');
+      playIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+      render();
+      return;
+    }
+    render();
+    raf = requestAnimationFrame(tick);
+  }
+
+  function play() {
+    if (t >= DURATION) t = 0;
+    playing = true;
+    last = 0;
+    player.classList.remove('is-paused');
+    playIcon.innerHTML = '<rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/>';
+    raf = requestAnimationFrame(tick);
+  }
+
+  function pause() {
+    playing = false;
+    cancelAnimationFrame(raf);
+    player.classList.add('is-paused');
+    playIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+  }
+
+  document.getElementById('playBtn').addEventListener('click', () => playing ? pause() : play());
+  document.getElementById('bigPlay').addEventListener('click', () => playing ? pause() : play());
+
+  document.getElementById('scrub').addEventListener('click', (e) => {
+    const rect = e.currentTarget.querySelector('.scrub-track').getBoundingClientRect();
+    const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    t = pct * DURATION;
+    render();
+  });
+
+  filmCells.forEach((c, i) => {
+    c.addEventListener('click', () => {
+      t = FRAME_AT[i];
+      render();
+    });
+  });
+
+  // Speed cycler
+  const SPEEDS = [0.5, 1.0, 1.5, 2.0];
+  let spIdx = 1;
+  speedBtn.addEventListener('click', () => {
+    spIdx = (spIdx + 1) % SPEEDS.length;
+    speed = SPEEDS[spIdx];
+    speedBtn.textContent = `${speed.toFixed(1)}×`;
+  });
+
+  // Keyboard
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.code === 'Space') { e.preventDefault(); playing ? pause() : play(); }
+    if (e.code === 'ArrowLeft')  { t = Math.max(0, t - 0.5); render(); }
+    if (e.code === 'ArrowRight') { t = Math.min(DURATION, t + 0.5); render(); }
+  });
+
+  render();
+</script>
+</body>
+</html>

@@ -1,0 +1,1144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Frame · 工作台 · 香氛瓶冷调推进</title>
+<link rel="stylesheet" href="assets/app.css" />
+<style>
+  /* ====== Layout ====== */
+  body { overflow: hidden; height: 100vh; }
+  .app {
+    display: grid;
+    grid-template-rows: 56px 1fr;
+    height: 100vh;
+  }
+  .work {
+    display: grid;
+    grid-template-columns: 260px minmax(420px, 1fr) 480px;
+    overflow: hidden;
+  }
+  .panel { overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+  .panel + .panel { border-left: 1px solid var(--border); }
+
+  /* ====== Sidebar tasks ====== */
+  .sidebar { background: var(--bg-subtle); }
+  .sidebar-head {
+    padding: 12px 12px 10px;
+    display: flex; gap: 6px; align-items: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-head .btn { flex: 1; }
+  .sidebar-list { flex: 1; overflow-y: auto; padding: 8px 8px 24px; }
+  .sidebar-section {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    padding: 14px 6px 6px;
+    font-weight: 500;
+  }
+  .task-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 8px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    color: var(--fg-soft);
+    font-size: 13px;
+    transition: background var(--t-fast) var(--ease);
+  }
+  .task-row:hover { background: var(--surface); }
+  .task-row.is-active { background: var(--surface); color: var(--fg); box-shadow: 0 1px 0 var(--border); }
+  .task-row.is-active::before {
+    content:""; width:3px; height:20px; background: var(--accent);
+    border-radius: 4px; margin-left: -5px; margin-right: -8px;
+  }
+  .task-thumb {
+    width: 32px; height: 32px;
+    border-radius: var(--r-sm);
+    overflow: hidden;
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+    position: relative;
+  }
+  .task-info { flex: 1; min-width: 0; }
+  .task-title {
+    font-size: 13px; font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .task-sub {
+    font-size: 11px; color: var(--muted);
+    margin-top: 1px;
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  /* ====== Chat panel ====== */
+  .chat-head {
+    height: 52px;
+    padding: 0 18px;
+    display: flex; align-items: center; gap: 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .chat-title {
+    font-family: var(--font-display);
+    font-size: 14px; font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+  .chat-head .meta {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .chat-stream {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 36px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .msg { display: flex; gap: 12px; }
+  .msg-avatar {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 600;
+    color: white;
+  }
+  .msg-avatar.user {
+    background: linear-gradient(135deg, oklch(78% 0.10 35), oklch(58% 0.16 320));
+  }
+  .msg-avatar.bot {
+    background:
+      conic-gradient(from 220deg at 50% 50%,
+        oklch(58% 0.18 255), oklch(64% 0.16 195), oklch(60% 0.20 295), oklch(58% 0.18 255));
+    color: transparent;
+    position: relative;
+  }
+  .msg-avatar.bot::after {
+    content:""; position:absolute; inset:5px;
+    background: var(--surface);
+    border-radius: 50%;
+  }
+  .msg-avatar.bot::before {
+    content:""; position:absolute;
+    width:8px; height:8px;
+    background: var(--accent);
+    z-index:1;
+    clip-path: polygon(0 0, 100% 50%, 0 100%);
+    left: 11px; top: 10px;
+  }
+  .msg-body { flex: 1; min-width: 0; }
+  .msg-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--fg);
+    margin-bottom: 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .msg-name .ts { font-weight: 400; color: var(--muted); font-size: 11.5px; }
+  .msg-text {
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--fg-soft);
+    text-wrap: pretty;
+  }
+  .msg-text strong { color: var(--fg); font-weight: 600; }
+  .msg-text code {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    background: var(--bg-subtle);
+    padding: 1px 5px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .msg-text ul { margin: 6px 0 0; padding-left: 18px; }
+  .msg-text li { margin-bottom: 2px; }
+
+  /* Inline cards in chat */
+  .chat-card {
+    margin-top: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .chat-card-head {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12.5px;
+  }
+  .chat-card-head .grow { flex: 1; }
+  .keyframe-mini-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 1px;
+    background: var(--border);
+  }
+  .keyframe-mini {
+    aspect-ratio: 9 / 16;
+    background: var(--surface);
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .keyframe-mini-num {
+    position: absolute;
+    top: 4px; left: 4px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    background: oklch(20% 0.02 250 / 0.7);
+    color: white;
+    padding: 1px 4px;
+    border-radius: 3px;
+    z-index: 1;
+  }
+  .keyframe-mini.is-loading {
+    background: linear-gradient(120deg, oklch(94% 0.005 250), oklch(98% 0.005 250) 50%, oklch(94% 0.005 250));
+    background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+  }
+
+  /* Diff card for single-frame regen */
+  .diff-card {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 14px;
+    padding: 14px;
+  }
+  .diff-card .arrow {
+    color: var(--muted);
+    font-size: 16px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+  }
+  .diff-card .arrow span { font-size: 10px; font-family: var(--font-mono); }
+  .diff-frame {
+    aspect-ratio: 9 / 16;
+    border-radius: var(--r-sm);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    position: relative;
+  }
+  .diff-label {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+    font-family: var(--font-mono);
+  }
+
+  /* Progress card */
+  .progress-card {
+    padding: 14px;
+  }
+  .progress-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 0;
+    font-size: 13px;
+    border-bottom: 1px dashed var(--border);
+  }
+  .progress-row:last-child { border-bottom: 0; }
+  .progress-row .ic {
+    width: 18px; height: 18px;
+    flex-shrink: 0;
+    color: var(--muted);
+  }
+  .progress-row.is-done .ic { color: var(--success); }
+  .progress-row.is-active .ic { color: var(--accent); }
+  .progress-row .grow { flex: 1; }
+  .progress-row .timing {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+
+  /* Composer in chat */
+  .chat-composer {
+    border-top: 1px solid var(--border);
+    padding: 14px 18px;
+    background: var(--bg-subtle);
+    flex-shrink: 0;
+  }
+  .chat-composer-inner {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: 10px 12px;
+    transition: border-color var(--t-fast) var(--ease);
+  }
+  .chat-composer-inner:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+  .chat-composer textarea {
+    width: 100%;
+    min-height: 40px;
+    border: 0;
+    background: transparent;
+    resize: none;
+    font-size: 14px;
+    line-height: 1.5;
+    outline: 0;
+  }
+  .chat-composer textarea::placeholder { color: var(--muted-2); }
+  .chat-composer-tools {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 6px;
+  }
+  .chat-composer-tools .grow { flex: 1; }
+  .chat-composer-tools button.icon {
+    width: 26px; height: 26px;
+    border: 0; background: transparent;
+    border-radius: var(--r-xs);
+    color: var(--muted);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .chat-composer-tools button.icon:hover { background: var(--bg-subtle); color: var(--fg); }
+  .chat-composer-hint {
+    font-size: 11px; color: var(--muted);
+    margin-top: 6px;
+    padding: 0 4px;
+    display: flex; align-items: center; gap: 12px;
+  }
+
+  /* ====== Right keyframe panel ====== */
+  .canvas-head {
+    height: 52px;
+    padding: 0 16px;
+    display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    background: var(--surface);
+  }
+  .canvas-tabs { display: flex; gap: 2px; }
+  .canvas-tab {
+    height: 30px; padding: 0 12px;
+    border-radius: var(--r-sm);
+    border: 0; background: transparent;
+    font-size: 12.5px; font-weight: 500;
+    color: var(--muted);
+  }
+  .canvas-tab:hover { background: var(--bg-subtle); color: var(--fg); }
+  .canvas-tab.is-active { background: var(--bg-subtle); color: var(--fg); }
+
+  .canvas-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+  }
+
+  .kf-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .kf-card {
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    background: var(--surface);
+    cursor: pointer;
+    position: relative;
+    transition: border-color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  }
+  .kf-card:hover { border-color: var(--border-strong); }
+  .kf-card.is-selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .kf-frame {
+    aspect-ratio: 9 / 16;
+    position: relative;
+    overflow: hidden;
+  }
+  .kf-num {
+    position: absolute;
+    top: 6px; left: 6px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    background: oklch(20% 0.02 250 / 0.78);
+    color: white;
+    padding: 2px 5px;
+    border-radius: 3px;
+    z-index: 1;
+  }
+  .kf-locked {
+    position: absolute;
+    top: 6px; right: 6px;
+    width: 20px; height: 20px;
+    background: oklch(20% 0.02 250 / 0.78);
+    color: white;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1;
+  }
+  .kf-meta {
+    padding: 7px 9px 8px;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+  }
+  .kf-meta .grow { flex: 1; }
+  .kf-meta .ts { font-family: var(--font-mono); }
+
+  /* Keyframe detail */
+  .kf-detail {
+    margin-top: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface);
+  }
+  .kf-detail-head {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg-subtle);
+    border-radius: var(--r-md) var(--r-md) 0 0;
+  }
+  .kf-detail-head h4 {
+    font-size: 13px;
+  }
+  .kf-detail-head .grow { flex: 1; }
+  .kf-detail-body { padding: 14px; }
+  .kf-big-frame {
+    aspect-ratio: 9 / 16;
+    max-width: 220px;
+    margin: 0 auto 14px;
+    border-radius: var(--r-md);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    position: relative;
+  }
+  .kf-field {
+    margin-bottom: 12px;
+  }
+  .kf-field-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  .kf-field-value {
+    font-size: 12.5px;
+    color: var(--fg);
+    line-height: 1.5;
+  }
+  .kf-field-value.mono { font-family: var(--font-mono); font-size: 11.5px; }
+  .kf-prompt-box {
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 8px 10px;
+    font-size: 12.5px;
+    color: var(--fg-soft);
+    line-height: 1.5;
+  }
+  .kf-actions {
+    display: flex; gap: 6px;
+    margin-top: 12px;
+  }
+  .kf-actions .btn { flex: 1; }
+
+  /* Timeline strip */
+  .timeline {
+    margin-top: 18px;
+    padding: 12px 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+  }
+  .timeline-row {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 10px;
+  }
+  .timeline-cell {
+    flex: 1;
+    aspect-ratio: 9 / 16;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    position: relative;
+  }
+  .timeline-tick {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--muted);
+    text-align: center;
+  }
+  .timeline-ticks {
+    display: flex; gap: 6px;
+  }
+  .timeline-ticks > div { flex: 1; text-align: center; }
+
+  /* Cache hit pill */
+  .cache-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10.5px;
+    font-family: var(--font-mono);
+    background: var(--success-soft);
+    color: oklch(38% 0.10 152);
+    border: 1px solid oklch(86% 0.05 152);
+    padding: 1px 5px;
+    border-radius: 3px;
+    height: 16px;
+  }
+  .cache-pill.is-miss {
+    background: var(--bg-subtle);
+    color: var(--muted);
+    border-color: var(--border);
+  }
+
+  /* ====== Visual placeholders ====== */
+  .vis-perfume-1 { background:
+    radial-gradient(circle at 50% 60%, oklch(94% 0.04 240), oklch(72% 0.06 220) 60%, oklch(40% 0.10 220));
+  }
+  .vis-perfume-1::after {
+    content:""; position:absolute; inset: 35% 40% 18% 40%;
+    background: linear-gradient(180deg, oklch(96% 0.02 220), oklch(72% 0.10 220));
+    border-radius: 4px 4px 8px 8px;
+    opacity: 0.85;
+  }
+  .vis-perfume-2 { background:
+    radial-gradient(circle at 50% 60%, oklch(96% 0.03 240), oklch(76% 0.08 220) 50%, oklch(38% 0.12 220));
+  }
+  .vis-perfume-2::after {
+    content:""; position:absolute; inset: 28% 38% 14% 38%;
+    background: linear-gradient(180deg, oklch(98% 0.02 220), oklch(70% 0.12 220));
+    border-radius: 4px 4px 10px 10px;
+  }
+  .vis-perfume-3 { background:
+    radial-gradient(circle at 45% 55%, oklch(96% 0.03 240), oklch(74% 0.08 215) 45%, oklch(35% 0.14 220));
+  }
+  .vis-perfume-3::after {
+    content:""; position:absolute; inset: 22% 35% 12% 35%;
+    background: linear-gradient(180deg, oklch(98% 0.02 220), oklch(68% 0.14 215));
+    border-radius: 4px 4px 12px 12px;
+    box-shadow: 0 8px 20px -4px oklch(30% 0.10 220 / 0.5);
+  }
+  .vis-perfume-3-fixed { background:
+    radial-gradient(circle at 50% 55%, oklch(96% 0.03 240), oklch(74% 0.08 215) 45%, oklch(35% 0.14 220));
+  }
+  .vis-perfume-3-fixed::after {
+    content:""; position:absolute; inset: 20% 36% 12% 36%;
+    background: linear-gradient(180deg, oklch(96% 0.02 220), oklch(66% 0.14 215));
+    border-radius: 4px 4px 12px 12px;
+    box-shadow: 0 8px 20px -4px oklch(30% 0.10 220 / 0.5);
+  }
+  .vis-perfume-4 { background:
+    radial-gradient(circle at 48% 50%, oklch(98% 0.02 240), oklch(76% 0.10 215) 40%, oklch(32% 0.16 220));
+  }
+  .vis-perfume-4::after {
+    content:""; position:absolute; inset: 16% 32% 10% 32%;
+    background: linear-gradient(180deg, oklch(98% 0.02 220), oklch(64% 0.16 215));
+    border-radius: 4px 4px 14px 14px;
+    box-shadow: 0 10px 22px -4px oklch(30% 0.10 220 / 0.55);
+  }
+  .vis-perfume-5 { background:
+    radial-gradient(circle at 50% 50%, oklch(98% 0.02 240), oklch(78% 0.12 210) 35%, oklch(28% 0.18 220));
+  }
+  .vis-perfume-5::after {
+    content:""; position:absolute; inset: 12% 28% 8% 28%;
+    background: linear-gradient(180deg, oklch(98% 0.02 220), oklch(60% 0.18 215));
+    border-radius: 4px 4px 16px 16px;
+    box-shadow: 0 12px 26px -4px oklch(28% 0.12 220 / 0.6);
+  }
+  .vis-perfume-6 { background:
+    radial-gradient(circle at 50% 50%, oklch(98% 0.02 240), oklch(80% 0.14 205) 30%, oklch(25% 0.20 220));
+  }
+  .vis-perfume-6::after {
+    content:""; position:absolute; inset: 8% 22% 6% 22%;
+    background: linear-gradient(180deg, oklch(98% 0.02 220), oklch(56% 0.20 215));
+    border-radius: 4px 4px 20px 20px;
+    box-shadow: 0 14px 30px -4px oklch(25% 0.14 220 / 0.65);
+  }
+
+  /* sidebar mini visuals */
+  .vis-mini-2 { background: linear-gradient(135deg, oklch(78% 0.10 35), oklch(58% 0.16 320)); }
+  .vis-mini-3 { background: linear-gradient(135deg, oklch(72% 0.14 195), oklch(80% 0.10 220)); }
+  .vis-mini-4 { background: linear-gradient(45deg, oklch(34% 0.04 295), oklch(56% 0.18 295)); }
+  .vis-mini-5 { background: linear-gradient(180deg, oklch(94% 0.02 250), oklch(82% 0.04 250)); }
+  .vis-mini-6 { background: radial-gradient(circle at 40% 40%, oklch(82% 0.10 50), oklch(45% 0.14 25)); }
+
+  /* Responsive — collapse */
+  @media (max-width: 1280px) {
+    .work { grid-template-columns: 220px minmax(380px, 1fr) 420px; }
+  }
+  @media (max-width: 1080px) {
+    .work { grid-template-columns: 1fr 420px; }
+    .sidebar { display: none; }
+    .chat-stream { padding: 20px 24px; }
+  }
+  @media (max-width: 820px) {
+    .work { grid-template-columns: 1fr; }
+    .panel + .panel { display: none; }
+    .nav-links, .search-mini { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- top nav -->
+  <header class="topnav">
+    <div class="topnav-inner">
+      <a class="brand" href="index.html"><span class="brand-mark"></span><span>Frame</span></a>
+      <nav class="nav-links">
+        <a class="nav-link" href="index.html">创作</a>
+        <a class="nav-link is-active" href="workspace.html">工作台</a>
+        <a class="nav-link" href="preview.html">最近预览</a>
+        <a class="nav-link" href="#">模板</a>
+      </nav>
+      <span class="nav-spacer"></span>
+      <button class="btn btn-sm" title="分享任务">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>
+        分享
+      </button>
+      <a class="btn btn-sm btn-primary" href="preview.html">
+        预览视频
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+      </a>
+      <span class="avatar" title="苏小棠">S</span>
+    </div>
+  </header>
+
+  <!-- workspace -->
+  <div class="work">
+
+    <!-- ====== Sidebar ====== -->
+    <aside class="panel sidebar">
+      <div class="sidebar-head">
+        <a class="btn btn-sm btn-primary" href="index.html">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5v14"/></svg>
+          新建任务
+        </a>
+        <button class="btn btn-sm btn-icon" title="筛选">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M6 12h12M10 18h4"/></svg>
+        </button>
+      </div>
+
+      <div class="sidebar-list">
+        <div class="sidebar-section">进行中</div>
+
+        <div class="task-row is-active">
+          <div class="task-thumb"><div class="thumb-content vis-perfume-3"></div></div>
+          <div class="task-info">
+            <div class="task-title">香氛瓶冷调推进 · v3</div>
+            <div class="task-sub"><span class="badge badge-warn" style="height:16px;font-size:10px;padding:0 5px">合成中</span> 9:16 · 6s</div>
+          </div>
+        </div>
+
+        <div class="task-row">
+          <div class="task-thumb"><div class="thumb-content vis-mini-6"></div></div>
+          <div class="task-info">
+            <div class="task-title">柚子苏打倾倒慢镜</div>
+            <div class="task-sub"><span class="badge badge-violet" style="height:16px;font-size:10px;padding:0 5px">关键帧</span> 9:16 · 8s</div>
+          </div>
+        </div>
+
+        <div class="sidebar-section">最近</div>
+
+        <div class="task-row">
+          <div class="task-thumb"><div class="thumb-content vis-mini-2"></div></div>
+          <div class="task-info">
+            <div class="task-title">服装平铺 → 模特上身</div>
+            <div class="task-sub"><span class="badge-dot" style="background:var(--success);width:5px;height:5px;border-radius:50%;display:inline-block"></span>已完成 · 5 分钟前</div>
+          </div>
+        </div>
+
+        <div class="task-row">
+          <div class="task-thumb"><div class="thumb-content vis-mini-3"></div></div>
+          <div class="task-info">
+            <div class="task-title">品牌主视觉淡入 · 16:9</div>
+            <div class="task-sub"><span class="badge-dot" style="background:var(--success);width:5px;height:5px;border-radius:50%;display:inline-block"></span>已完成 · 1 小时前</div>
+          </div>
+        </div>
+
+        <div class="task-row">
+          <div class="task-thumb"><div class="thumb-content vis-mini-4"></div></div>
+          <div class="task-info">
+            <div class="task-title">数码产品开箱 · v2</div>
+            <div class="task-sub"><span class="badge-dot" style="background:var(--danger);width:5px;height:5px;border-radius:50%;display:inline-block"></span>失败 · 2 小时前</div>
+          </div>
+        </div>
+
+        <div class="task-row">
+          <div class="task-thumb"><div class="thumb-content vis-mini-5"></div></div>
+          <div class="task-info">
+            <div class="task-title">零食包装摆拍 → 推近</div>
+            <div class="task-sub"><span class="badge-dot" style="background:var(--success);width:5px;height:5px;border-radius:50%;display:inline-block"></span>已完成 · 昨天</div>
+          </div>
+        </div>
+
+        <div class="task-row">
+          <div class="task-thumb"><div class="thumb-content vis-mini-6"></div></div>
+          <div class="task-info">
+            <div class="task-title">果汁广告素材 v1</div>
+            <div class="task-sub"><span class="badge-dot" style="background:var(--success);width:5px;height:5px;border-radius:50%;display:inline-block"></span>已完成 · 2 天前</div>
+          </div>
+        </div>
+
+        <div class="task-row">
+          <div class="task-thumb"><div class="thumb-content vis-mini-2"></div></div>
+          <div class="task-info">
+            <div class="task-title">面霜质地特写</div>
+            <div class="task-sub"><span class="badge-dot" style="background:var(--success);width:5px;height:5px;border-radius:50%;display:inline-block"></span>已完成 · 3 天前</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ====== Chat panel ====== -->
+    <section class="panel">
+      <div class="chat-head">
+        <h3 class="chat-title">香氛瓶冷调推进 · v3</h3>
+        <span class="badge badge-warn"><span class="badge-dot"></span>合成中</span>
+        <span class="meta tab-num">· 9:16 · 6s · 24fps · 6 关键帧</span>
+        <span class="grow" style="flex:1"></span>
+        <button class="btn btn-sm btn-ghost" title="复制参数">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+        <button class="btn btn-sm btn-ghost" title="设置">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+
+      <div class="chat-stream" id="stream">
+
+        <!-- user msg 1 -->
+        <div class="msg">
+          <div class="msg-avatar user">苏</div>
+          <div class="msg-body">
+            <div class="msg-name">你 <span class="ts">10:14</span></div>
+            <div class="msg-text">
+              一瓶冷调香水在丝绸背景上缓慢旋转,顶光从左前方打入,镜头由远推近。
+              9:16 竖版,6 秒,产品摄影风格,运动方式 <code>zoom_in</code>。
+            </div>
+          </div>
+        </div>
+
+        <!-- bot msg 1: plan + keyframe gen -->
+        <div class="msg">
+          <div class="msg-avatar bot">F</div>
+          <div class="msg-body">
+            <div class="msg-name">Frame · Director <span class="ts">10:14</span></div>
+            <div class="msg-text">
+              收到。我会按 <strong>6 张关键帧</strong>分镜,从远景推近到瓶身特写。冷调蓝白光线,丝绸背景做柔焦虚化。
+              <ul>
+                <li>帧 1—2:远景,瓶身在画面中部偏小</li>
+                <li>帧 3—4:中景,镜头自旋微推近</li>
+                <li>帧 5—6:特写,瓶口与喷头,焦点收紧</li>
+              </ul>
+              先行检查缓存:命中 <strong>3 / 6</strong> 帧,实际仅生成 3 张新帧。
+            </div>
+
+            <div class="chat-card">
+              <div class="chat-card-head">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>
+                <strong style="font-weight:600">关键帧 6 / 6</strong>
+                <span class="cache-pill">cache 3/6</span>
+                <span class="grow"></span>
+                <span class="tab-num" style="color:var(--muted);font-family:var(--font-mono);font-size:11px">14.2s/帧 · 共 42s</span>
+              </div>
+              <div class="keyframe-mini-grid">
+                <div class="keyframe-mini"><span class="keyframe-mini-num">01</span><div class="thumb-content vis-perfume-1"></div></div>
+                <div class="keyframe-mini"><span class="keyframe-mini-num">02</span><div class="thumb-content vis-perfume-2"></div></div>
+                <div class="keyframe-mini"><span class="keyframe-mini-num">03</span><div class="thumb-content vis-perfume-3"></div></div>
+                <div class="keyframe-mini"><span class="keyframe-mini-num">04</span><div class="thumb-content vis-perfume-4"></div></div>
+                <div class="keyframe-mini"><span class="keyframe-mini-num">05</span><div class="thumb-content vis-perfume-5"></div></div>
+                <div class="keyframe-mini"><span class="keyframe-mini-num">06</span><div class="thumb-content vis-perfume-6"></div></div>
+              </div>
+              <div style="padding:9px 12px;display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--border)">
+                <span>seed <span class="mono">428917</span></span>
+                <span>·</span>
+                <span>style <span class="mono">product_photography</span></span>
+                <span class="grow" style="flex:1"></span>
+                <button class="btn btn-sm btn-ghost">在画板查看 →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- user msg 2: ask to fix frame 3 -->
+        <div class="msg">
+          <div class="msg-avatar user">苏</div>
+          <div class="msg-body">
+            <div class="msg-name">你 <span class="ts">10:16</span></div>
+            <div class="msg-text">
+              第 3 帧瓶身偏左了,把它<strong>居中</strong>,顶光<strong>稍弱一点</strong>。其他帧都很好,锁定不要变。
+            </div>
+          </div>
+        </div>
+
+        <!-- bot msg 2: regen frame 3 with diff -->
+        <div class="msg">
+          <div class="msg-avatar bot">F</div>
+          <div class="msg-body">
+            <div class="msg-name">Frame · Director <span class="ts">10:16</span></div>
+            <div class="msg-text">
+              已锁定 帧 1、2、4、5、6,只重新生成 <strong>帧 3</strong>。微调:
+              <code>composition: centered</code>、<code>top_light_intensity: -20%</code>,seed 沿用。
+            </div>
+
+            <div class="chat-card">
+              <div class="chat-card-head">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
+                <strong style="font-weight:600">单帧重生成 · 帧 3</strong>
+                <span class="cache-pill is-miss">no cache · 14.0s</span>
+                <span class="grow"></span>
+                <span class="badge badge-success" style="height:18px;font-size:10.5px"><span class="badge-dot"></span>已完成</span>
+              </div>
+              <div class="diff-card">
+                <div>
+                  <div class="diff-frame"><div class="thumb-content vis-perfume-3"></div></div>
+                  <div class="diff-label">v1 · 偏左 · top_light 80%</div>
+                </div>
+                <div class="arrow">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                  <span>v2</span>
+                </div>
+                <div>
+                  <div class="diff-frame" style="border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft)">
+                    <div class="thumb-content vis-perfume-3-fixed"></div>
+                  </div>
+                  <div class="diff-label" style="color:var(--accent)">v2 · 居中 · top_light 64%</div>
+                </div>
+              </div>
+              <div style="padding:9px 12px;display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--border)">
+                <span>受影响中间帧 <span class="mono" style="color:var(--fg)">3</span> / 中间帧总数 <span class="mono">120</span></span>
+                <span class="grow" style="flex:1"></span>
+                <button class="btn btn-sm btn-ghost">采用 v2</button>
+                <button class="btn btn-sm btn-ghost">保留 v1</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- user msg 3: ask to compose -->
+        <div class="msg">
+          <div class="msg-avatar user">苏</div>
+          <div class="msg-body">
+            <div class="msg-name">你 <span class="ts">10:18</span></div>
+            <div class="msg-text">
+              完美。开始合成视频,加 <code>zoom_in</code> 动画,中间用 RIFE 插帧到 24fps。
+            </div>
+          </div>
+        </div>
+
+        <!-- bot msg 3: progress card -->
+        <div class="msg">
+          <div class="msg-avatar bot">F</div>
+          <div class="msg-body">
+            <div class="msg-name">Frame · Director <span class="ts">10:18</span></div>
+            <div class="msg-text">
+              已开始合成。预计 <strong>52 秒</strong>后产出 mp4。完成后可在右上角 <em>预览视频</em> 打开。
+            </div>
+
+            <div class="chat-card">
+              <div class="chat-card-head">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 7 13 12 22 17 22 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+                <strong style="font-weight:600">视频合成 pipeline</strong>
+                <span class="grow"></span>
+                <span class="tab-num" style="color:var(--muted);font-family:var(--font-mono);font-size:11px">已用 32s · 还需 ~20s</span>
+              </div>
+              <div class="progress-card">
+                <div class="progress-row is-done">
+                  <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg>
+                  <strong>① 关键帧检查 · 6 帧</strong>
+                  <span class="grow"></span>
+                  <span class="cache-pill">cache 5/6</span>
+                  <span class="timing">2.1s</span>
+                </div>
+                <div class="progress-row is-done">
+                  <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg>
+                  <strong>② RIFE 插帧 · 144 中间帧</strong>
+                  <span class="grow"></span>
+                  <span class="timing">12.4s</span>
+                </div>
+                <div class="progress-row is-active">
+                  <svg class="ic spinner-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                    <circle cx="12" cy="12" r="9" stroke-dasharray="60 60" />
+                  </svg>
+                  <strong>③ FFmpeg 合成 · 720×1280 / 24fps</strong>
+                  <span class="grow"></span>
+                  <span class="timing">17s · 74%</span>
+                </div>
+                <div class="progress-row">
+                  <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>
+                  <span style="color:var(--muted)">④ 写入缓存 · 上传预览地址</span>
+                  <span class="grow"></span>
+                  <span class="timing">~3s</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- composer -->
+      <div class="chat-composer">
+        <div class="chat-composer-inner">
+          <textarea placeholder="继续描述微调…例如:把第 5 帧背景换成米白色丝绸"></textarea>
+          <div class="chat-composer-tools">
+            <button class="icon" title="附件 / 参考图">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.49"/></svg>
+            </button>
+            <button class="icon" title="选中关键帧">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/></svg>
+            </button>
+            <span class="chip" style="height:24px;font-size:11.5px;padding: 0 8px">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              帧 1—2、4—6 已锁定
+            </span>
+            <span class="grow"></span>
+            <span style="font-size:11px;color:var(--muted)">⌘ + ⏎ 发送</span>
+            <button class="btn btn-sm btn-accent" style="height:28px">
+              发送
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ====== Right canvas ====== -->
+    <aside class="panel">
+      <div class="canvas-head">
+        <div class="canvas-tabs">
+          <button class="canvas-tab is-active">关键帧</button>
+          <button class="canvas-tab">动画</button>
+          <button class="canvas-tab">缓存</button>
+          <button class="canvas-tab">参数</button>
+        </div>
+        <span class="grow" style="flex:1"></span>
+        <button class="btn btn-sm btn-ghost" title="刷新">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
+        </button>
+      </div>
+
+      <div class="canvas-body">
+
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <span class="eyebrow">关键帧 · 6 / 6</span>
+          <span class="grow" style="flex:1"></span>
+          <span class="cache-pill">缓存命中 5/6</span>
+        </div>
+
+        <div class="kf-grid">
+          <div class="kf-card" data-frame="1">
+            <div class="kf-frame">
+              <span class="kf-num">01</span>
+              <span class="kf-locked" title="已锁定">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </span>
+              <div class="thumb-content vis-perfume-1"></div>
+            </div>
+            <div class="kf-meta">
+              <span class="ts">0.0s</span>
+              <span class="grow"></span>
+              <span class="cache-pill" style="height:14px;font-size:9.5px;padding:0 4px">cache</span>
+            </div>
+          </div>
+
+          <div class="kf-card" data-frame="2">
+            <div class="kf-frame">
+              <span class="kf-num">02</span>
+              <span class="kf-locked">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </span>
+              <div class="thumb-content vis-perfume-2"></div>
+            </div>
+            <div class="kf-meta">
+              <span class="ts">1.2s</span>
+              <span class="grow"></span>
+              <span class="cache-pill" style="height:14px;font-size:9.5px;padding:0 4px">cache</span>
+            </div>
+          </div>
+
+          <div class="kf-card is-selected" data-frame="3">
+            <div class="kf-frame">
+              <span class="kf-num">03</span>
+              <div class="thumb-content vis-perfume-3-fixed"></div>
+            </div>
+            <div class="kf-meta">
+              <span class="ts">2.4s</span>
+              <span class="grow"></span>
+              <span class="cache-pill is-miss" style="height:14px;font-size:9.5px;padding:0 4px">v2</span>
+            </div>
+          </div>
+
+          <div class="kf-card" data-frame="4">
+            <div class="kf-frame">
+              <span class="kf-num">04</span>
+              <span class="kf-locked">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </span>
+              <div class="thumb-content vis-perfume-4"></div>
+            </div>
+            <div class="kf-meta">
+              <span class="ts">3.6s</span>
+              <span class="grow"></span>
+              <span class="cache-pill" style="height:14px;font-size:9.5px;padding:0 4px">cache</span>
+            </div>
+          </div>
+
+          <div class="kf-card" data-frame="5">
+            <div class="kf-frame">
+              <span class="kf-num">05</span>
+              <span class="kf-locked">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </span>
+              <div class="thumb-content vis-perfume-5"></div>
+            </div>
+            <div class="kf-meta">
+              <span class="ts">4.8s</span>
+              <span class="grow"></span>
+              <span class="cache-pill" style="height:14px;font-size:9.5px;padding:0 4px">cache</span>
+            </div>
+          </div>
+
+          <div class="kf-card" data-frame="6">
+            <div class="kf-frame">
+              <span class="kf-num">06</span>
+              <span class="kf-locked">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </span>
+              <div class="thumb-content vis-perfume-6"></div>
+            </div>
+            <div class="kf-meta">
+              <span class="ts">6.0s</span>
+              <span class="grow"></span>
+              <span class="cache-pill" style="height:14px;font-size:9.5px;padding:0 4px">cache</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- selected frame detail -->
+        <div class="kf-detail">
+          <div class="kf-detail-head">
+            <h4>关键帧 · 03</h4>
+            <span class="badge badge-accent" style="height:18px;font-size:10.5px"><span class="badge-dot"></span>已修订 v2</span>
+            <span class="grow"></span>
+            <button class="btn btn-sm btn-icon" title="切回 v1">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></svg>
+            </button>
+          </div>
+          <div class="kf-detail-body">
+            <div class="kf-big-frame"><div class="thumb-content vis-perfume-3-fixed"></div></div>
+
+            <div class="kf-field">
+              <div class="kf-field-label">单帧 prompt</div>
+              <div class="kf-prompt-box">冷调香水瓶,瓶身居中,丝绸背景柔焦,顶光从左前方打入(强度 64%),冷蓝白光,产品摄影,中景</div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div class="kf-field">
+                <div class="kf-field-label">Seed</div>
+                <div class="kf-field-value mono">428917</div>
+              </div>
+              <div class="kf-field">
+                <div class="kf-field-label">分辨率</div>
+                <div class="kf-field-value mono">720 × 1280</div>
+              </div>
+              <div class="kf-field">
+                <div class="kf-field-label">模型</div>
+                <div class="kf-field-value mono">SDXL · ProductPhoto-LoRA v3</div>
+              </div>
+              <div class="kf-field">
+                <div class="kf-field-label">时间戳</div>
+                <div class="kf-field-value mono tab-num">00:02.400</div>
+              </div>
+            </div>
+
+            <div class="kf-actions">
+              <button class="btn btn-sm">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
+                重新生成
+              </button>
+              <button class="btn btn-sm">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                锁定
+              </button>
+              <button class="btn btn-sm">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                导出
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- timeline -->
+        <div class="timeline">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="eyebrow">时间轴</span>
+            <span style="margin-left:auto;font-size:11px;color:var(--muted);font-family:var(--font-mono)">6.0s · 24fps · 144 中间帧</span>
+          </div>
+          <div class="timeline-row">
+            <div class="timeline-cell"><div class="thumb-content vis-perfume-1"></div></div>
+            <div class="timeline-cell"><div class="thumb-content vis-perfume-2"></div></div>
+            <div class="timeline-cell" style="border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft)"><div class="thumb-content vis-perfume-3-fixed"></div></div>
+            <div class="timeline-cell"><div class="thumb-content vis-perfume-4"></div></div>
+            <div class="timeline-cell"><div class="thumb-content vis-perfume-5"></div></div>
+            <div class="timeline-cell"><div class="thumb-content vis-perfume-6"></div></div>
+          </div>
+          <div class="timeline-ticks" style="margin-top: 6px">
+            <div class="timeline-tick">0.0</div>
+            <div class="timeline-tick">1.2</div>
+            <div class="timeline-tick">2.4</div>
+            <div class="timeline-tick">3.6</div>
+            <div class="timeline-tick">4.8</div>
+            <div class="timeline-tick">6.0</div>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<script>
+  // Auto-scroll chat to bottom
+  const stream = document.getElementById('stream');
+  if (stream) stream.scrollTop = stream.scrollHeight;
+
+  // Tab switching on canvas
+  document.querySelectorAll('.canvas-tabs .canvas-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.canvas-tabs .canvas-tab').forEach(t => t.classList.remove('is-active'));
+      tab.classList.add('is-active');
+    });
+  });
+
+  // Frame select
+  document.querySelectorAll('.kf-card').forEach(card => {
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.kf-card').forEach(c => c.classList.remove('is-selected'));
+      card.classList.add('is-selected');
+    });
+  });
+
+  // Sidebar task switch
+  document.querySelectorAll('.task-row').forEach(r => {
+    r.addEventListener('click', () => {
+      document.querySelectorAll('.task-row').forEach(x => x.classList.remove('is-active'));
+      r.classList.add('is-active');
+    });
+  });
+
+  // Spinner ic animation
+  const styleEl = document.createElement('style');
+  styleEl.textContent = `
+    .spinner-ic { animation: spin 0.9s linear infinite; transform-origin: center; }
+  `;
+  document.head.appendChild(styleEl);
+</script>
+</body>
+</html>
