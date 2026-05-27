@@ -1283,9 +1283,20 @@ function fallbackSmoothAnimation(input: CreateTaskInput, frameCount: number, mot
       continuityStrategy: '每条 Wan 提示词重复: one silver-red giant armored hero, one dark gray reptilian kaiju with glowing dorsal plates, same ruined night city, same blue moonlight and orange firelight, both subjects in the same frame。'
     };
   }
+  if (isConflictPrompt(input.prompt)) {
+    const subjects = parsePromptSubjects(input.prompt);
+    return {
+      durationSeconds: input.duration,
+      summary: `先把“${input.prompt}”润色成 ${subjects.a} 与 ${subjects.b} 的连续动作过程,再拆成 ${frameCount} 张每秒定格。`,
+      motionArc: `${motion} 作为主运动,从能看清两个主体和场景关系的画面,逐步推进到动作交锋中心和最终收束定格。`,
+      timing: `共 ${frameCount} 张关键帧: 开场建立双方和场景,中段推进接近与交锋,结尾停在动作关系最清楚的一帧。`,
+      transitionLogic: '每一帧必须从上一帧自然推进,只改变距离、姿态、裁切、烟尘/光影或动作张力,不能改主体身份、数量和背景。',
+      continuityStrategy: `每条 Wan 提示词重复 ${subjects.a}、${subjects.b}、同一场景、同一主光方向、同一背景参照物和双方同框关系。`
+    };
+  }
   return {
     durationSeconds: input.duration,
-    summary: `把用户描述“${input.prompt}”扩写成一段 ${input.duration}s 的丝滑短动画: 先用首帧建立主体、空间和光线基准,随后按每秒 1 帧连续推进镜头,最后以稳定、清晰的视觉锚点收束。`,
+    summary: `先把用户描述“${input.prompt}”润色成完整动画过程,再拆成 ${frameCount} 张每秒定格: 开场建立主体和空间,中段推进具体变化,结尾收束到稳定记忆点。`,
     motionArc: `${motion} 作为主运动,所有帧只做小幅、可插值的镜头距离/角度/裁切/光影变化,让 Wan 生成的关键帧能首尾串联。`,
     timing: `共 ${frameCount} 张关键帧,第 0 秒建立画面,中段逐步强化主体细节和情绪,最后 1-2 秒收束到最有记忆点的画面。`,
     transitionLogic: '每一帧都继承上一帧的主体、场景和光线,只推进一个明确变化点,避免跳切、换主体、换背景或突然新增元素。',
