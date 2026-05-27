@@ -5,7 +5,7 @@
   "description": "AI video generation platform - Next.js + Codex CLI orchestrator + ComfyUI GGUF Wan + FFmpeg",
   "scripts": {
     "dev": "next dev -p 3000",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start -p 3000",
     "comfyui:cpu": "powershell -ExecutionPolicy Bypass -File scripts/start-comfyui.ps1",
     "comfyui:gpu": "powershell -ExecutionPolicy Bypass -File scripts/start-comfyui.ps1 -Gpu",
@@ -17,7 +17,7 @@
     "better-sqlite3": "11.5.0",
     "ffmpeg-static": "^5.3.0",
     "nanoid": "5.0.7",
-    "next": "15.0.3",
+    "next": "^16.2.6",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-markdown": "^9.0.1",
