@@ -2,18 +2,14 @@
   "name": "frame-ai-video",
   "version": "0.1.0",
   "private": true,
-  "description": "AI 帧动画视频生成平台 · Next.js 全栈 + Codex CLI orchestrator + ComfyUI + FFmpeg",
+  "description": "AI video generation platform - Next.js + Codex CLI orchestrator + direct Wan worker + FFmpeg",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "init-db": "tsx src/lib/init-db.ts",
-    "comfyui:install": "node scripts/comfyui-install.mjs",
-    "comfyui:model": "node scripts/comfyui-model.mjs",
-    "comfyui:start": "node scripts/comfyui-start.mjs",
-    "dev:comfyui": "node scripts/dev-with-comfyui.mjs"
+    "init-db": "tsx src/lib/init-db.ts"
   },
   "dependencies": {
     "better-sqlite3": "11.5.0",

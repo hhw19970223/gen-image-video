@@ -156,7 +156,7 @@ export default function WorkspaceView({
   }, [task.id]);
 
   const onCancelTask = useCallback(async () => {
-    if (!window.confirm('确定取消这个任务吗？正在生成的 ComfyUI 队列会被中断。')) return;
+    if (!window.confirm('确定取消这个任务吗？正在生成的视频进程会被标记中断。')) return;
     const r = await fetch(`/api/video-tasks/${task.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },

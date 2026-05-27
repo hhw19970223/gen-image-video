@@ -1,4 +1,4 @@
-// 任务编排器 —— 串起 Codex 规划 + ComfyUI/Mock 生图 + FFmpeg 合成 + 缓存
+// 任务编排器 —— 串起 Codex 规划 + Wan 直接视频生成 + FFmpeg 抽帧 + 缓存
 //
 // 入口: runTaskPipeline(taskId)
 //   - 状态机: pending -> planning -> generating_keyframes -> composing_video -> completed
@@ -10,11 +10,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { planFrames, translatePlanForGeneration, translateTextForGeneration } from './adapters/codex';
-import { generateVideo } from './adapters/comfy-video';
+import { generateVideo } from './adapters/wan-direct';
 import { composeVideo, extractCover, extractFramesFromVideo } from './adapters/ffmpeg';
-import { generateImage, makeThumbnail } from './adapters/image-gen';
+import { makeThumbnail } from './adapters/thumbnail';
 import { hashFile, keyframeCacheKey, videoCacheKey } from './cache-key';
-import { cancelComfyPrompts } from './comfyui';
 import { bus } from './events';
 import { taskDir, cacheFile } from './paths';
 import { parseReferenceImagePaths } from './reference-images';
@@ -33,9 +32,8 @@ import {
   updateTask
 } from './repo';
 import type { ConfirmedFramePlan, CreateTaskInput, KeyframeRow, VideoTaskRow } from './types';
-import { COST_PER_KEYFRAME } from './types';
 
-// 同一时间只跑一个 task,避免本地 ComfyUI 排队冲突
+// 同一时间只跑一个 task,避免本地视频模型抢占显存/内存
 let _running: Promise<void> = Promise.resolve();
 const _queue: Set<string> = new Set();
 
@@ -171,7 +169,7 @@ async function pipeline(task: VideoTaskRow): Promise<void> {
       height: task.height,
       style: task.style,
       reference_image_hash: refHash,
-      model: `comfyui:${consistencyMode}:english:v3`
+      model: `wan-direct:${consistencyMode}:english:v1`
     });
     insertKeyframe({
       task_id: taskId,
@@ -190,75 +188,8 @@ async function pipeline(task: VideoTaskRow): Promise<void> {
     });
   }
 
-  // 3. 逐帧生成 / 命中缓存
+  // 3. 直接生成视频,再从视频抽取图册关键帧
   await generateVideoForTask(taskId, generationPrompts.videoPrompt, generationPrompts.negativePrompt, referencePaths);
-  return;
-
-  const taskForGeneration = getTask(taskId) ?? task;
-  setTaskStatus(taskId, 'generating_keyframes', '生成关键帧中…', 8);
-  emit(taskId, 'status', { status: 'generating_keyframes', message: '生成关键帧中…', progress: 8 });
-
-  const keyframes = listKeyframes(taskId);
-  let cacheHits = 0;
-  let costSaved = 0;
-  let completedFrames = 0;
-  const frameConcurrency = readPositiveInt(process.env.COMFYUI_FRAME_CONCURRENCY, 1);
-  appendChatLog({
-    task_id: taskId,
-    role: 'orchestrator',
-    kind: 'note',
-    content: JSON.stringify({ frame_concurrency: frameConcurrency, consistency_mode: consistencyMode })
-  });
-
-  const markCompleted = (kf: KeyframeRow): void => {
-    const updated = getKeyframe(kf.id)!;
-    if (updated.cache_hit) {
-      cacheHits++;
-      costSaved += COST_PER_KEYFRAME;
-    }
-    completedFrames++;
-    const progress = 8 + Math.floor((completedFrames / keyframes.length) * 60);
-    setTaskStatus(taskId, 'generating_keyframes', `已完成 ${completedFrames}/${keyframes.length} 帧`, progress);
-    emit(taskId, 'frame', { index: kf.frame_index, total: keyframes.length, frameId: kf.id });
-    emit(taskId, 'progress', { progress });
-  };
-
-  if ((consistencyMode === 'anchor' || consistencyMode === 'previous') && keyframes.length > 1) {
-    const anchor = keyframes[0];
-    throwIfCancelled(taskId);
-    await generateOneFrame(taskForGeneration, anchor, /*forceRegenerate=*/ false);
-    markCompleted(anchor);
-    let initPath: string | undefined = getKeyframe(anchor.id)?.image_path ?? undefined;
-    if (typeof initPath !== 'string' || !fs.existsSync(initPath as string)) {
-      throw new Error('首帧锚定图不存在,无法生成连续关键帧');
-    }
-
-    const followupConcurrency = consistencyMode === 'previous' ? 1 : frameConcurrency;
-    await mapWithConcurrency(keyframes.slice(1), followupConcurrency, async kf => {
-      throwIfCancelled(taskId);
-      await generateOneFrame(taskForGeneration, kf, /*forceRegenerate=*/ false, initPath);
-      markCompleted(kf);
-      if (consistencyMode === 'previous') {
-        const currentPath = getKeyframe(kf.id)?.image_path;
-        if (currentPath && fs.existsSync(currentPath)) initPath = currentPath;
-      }
-    });
-  } else {
-    await mapWithConcurrency(keyframes, frameConcurrency, async kf => {
-      throwIfCancelled(taskId);
-      await generateOneFrame(taskForGeneration, kf, /*forceRegenerate=*/ false);
-      markCompleted(kf);
-    });
-  }
-  throwIfCancelled(taskId);
-
-  updateTask(taskId, {
-    cache_keyframe_hits: cacheHits,
-    cost_saved: +costSaved.toFixed(2)
-  });
-
-  // 4. 合成视频
-  await composeForTask(taskId);
 }
 
 function taskCreateInput(task: VideoTaskRow, referencePaths: string[]): CreateTaskInput {
@@ -293,20 +224,13 @@ function readConfirmedPlan(task: VideoTaskRow): (ConfirmedFramePlan & { source: 
 export async function cancelTaskPipeline(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`task not found: ${taskId}`);
-  const keyframes = listKeyframes(taskId);
-  const comfy = await cancelComfyPrompts(keyframes.map(kf => ({
-    prompt: kf.generation_prompt ?? kf.prompt,
-    seed: kf.seed,
-    width: task.width,
-    height: task.height
-  })));
 
   cancelTask(taskId);
   appendChatLog({
     task_id: taskId,
     role: 'system',
     kind: 'note',
-    content: JSON.stringify({ action: 'cancel', message: '任务已取消', comfyui: comfy })
+    content: JSON.stringify({ action: 'cancel', message: '任务已取消' })
   });
   bus.emitTask(taskId, {
     type: 'status',
@@ -338,277 +262,12 @@ async function resumeExistingTask(taskId: string): Promise<void> {
     await generateVideoForTask(
       taskId,
       task.generation_prompt ?? task.prompt,
-      task.generation_negative_prompt ?? process.env.COMFYUI_NEGATIVE ?? 'lowres, blurry, watermark, text, deformed',
+      task.generation_negative_prompt ?? process.env.WAN_NEGATIVE ?? 'lowres, blurry, watermark, text, deformed',
       parseReferenceImagePaths(task.reference_image_path)
     );
     return;
   }
-
-  const pending = keyframes.filter(k => k.status !== 'completed' || !k.image_path);
-  if (pending.length === 0) {
-    await composeForTask(taskId);
-    return;
-  }
-
-  setTaskStatus(taskId, 'generating_keyframes', `继续生成剩余 ${pending.length}/${keyframes.length} 帧…`, task.progress);
-  emit(taskId, 'status', {
-    status: 'generating_keyframes',
-    message: `继续生成剩余 ${pending.length}/${keyframes.length} 帧…`,
-    progress: task.progress
-  });
-
-  let completedFrames = keyframes.length - pending.length;
-  let cacheHits = keyframes.filter(k => k.cache_hit).length;
-  let costSaved = +(cacheHits * COST_PER_KEYFRAME).toFixed(2);
-  const frameConcurrency = readPositiveInt(process.env.COMFYUI_FRAME_CONCURRENCY, 1);
-
-  await mapWithConcurrency(pending, frameConcurrency, async kf => {
-    throwIfCancelled(taskId);
-    await generateOneFrame(task, kf, /*forceRegenerate=*/ false);
-    const updated = getKeyframe(kf.id)!;
-    if (updated.cache_hit) {
-      cacheHits++;
-      costSaved += COST_PER_KEYFRAME;
-    }
-    completedFrames++;
-    const progress = 8 + Math.floor((completedFrames / keyframes.length) * 60);
-    setTaskStatus(taskId, 'generating_keyframes', `已完成 ${completedFrames}/${keyframes.length} 帧`, progress);
-    emit(taskId, 'frame', { index: kf.frame_index, total: keyframes.length, frameId: kf.id });
-    emit(taskId, 'progress', { progress });
-  });
-
-  updateTask(taskId, {
-    cache_keyframe_hits: cacheHits,
-    cost_saved: +costSaved.toFixed(2)
-  });
-  throwIfCancelled(taskId);
-  await composeForTask(taskId);
-}
-
-/**
- * 单帧生成: 检查缓存 -> 命中复用,未命中调用 image-gen + 写入缓存
- */
-async function generateOneFrame(
-  task: VideoTaskRow,
-  kf: KeyframeRow,
-  forceRegenerate: boolean,
-  initImagePath?: string
-): Promise<void> {
-  throwIfCancelled(task.id);
-  if (kf.locked && !forceRegenerate) {
-    appendChatLog({
-      task_id: task.id,
-      role: 'system',
-      kind: 'note',
-      content: `第 ${kf.frame_index + 1} 帧已锁定,跳过生成`
-    });
-    return;
-  }
-
-  // 缓存查询
-  if (!forceRegenerate) {
-    const hit = getCacheByKey(kf.cache_key);
-    if (hit && fs.existsSync(hit.file_path)) {
-      const dst = path.join(taskDir(task.id), 'keyframes', `frame_${String(kf.frame_index).padStart(3, '0')}.png`);
-      if (path.resolve(dst) !== path.resolve(hit.file_path)) {
-        fs.copyFileSync(hit.file_path, dst);
-      }
-      const thumb = path.join(taskDir(task.id), 'thumbs', `frame_${String(kf.frame_index).padStart(3, '0')}.webp`);
-      try {
-        await makeThumbnail(dst, thumb);
-      } catch {
-        /* swallow */
-      }
-      recordCacheHit(kf.cache_key);
-      updateKeyframe(kf.id, {
-        image_path: dst,
-        thumbnail_path: thumb,
-        cache_hit: 1,
-        status: 'completed',
-        duration_ms: 0
-      });
-      appendChatLog({
-        task_id: task.id,
-        role: 'orchestrator',
-        kind: 'frame_generation',
-        content: JSON.stringify({ frame_index: kf.frame_index, cache_hit: true, cache_key: kf.cache_key })
-      });
-      return;
-    }
-  }
-
-  // 未命中: 调用图像生成
-  updateKeyframe(kf.id, { status: 'generating' });
-  emit(task.id, 'frame', { index: kf.frame_index, status: 'generating', frameId: kf.id });
-
-  const dst = path.join(taskDir(task.id), 'keyframes', `frame_${String(kf.frame_index).padStart(3, '0')}.png`);
-  try {
-    const result = await generateImageWithRetry(task, kf, dst, initImagePath);
-    // 写入缓存
-    const cacheDst = cacheFile(kf.cache_key, 'png');
-    if (!fs.existsSync(cacheDst)) {
-      fs.copyFileSync(dst, cacheDst);
-    }
-    insertCache({
-      cache_key: kf.cache_key,
-      cache_type: 'keyframe',
-      file_path: cacheDst,
-      meta: { frame_index: kf.frame_index, backend: result.backend, seed: kf.seed }
-    });
-    // 缩略图
-    const thumb = path.join(taskDir(task.id), 'thumbs', `frame_${String(kf.frame_index).padStart(3, '0')}.webp`);
-    try {
-      await makeThumbnail(dst, thumb);
-    } catch {
-      /* swallow */
-    }
-    updateKeyframe(kf.id, {
-      image_path: dst,
-      thumbnail_path: thumb,
-      cache_hit: 0,
-      status: 'completed',
-      duration_ms: result.durationMs
-    });
-    appendChatLog({
-      task_id: task.id,
-      role: 'orchestrator',
-      kind: 'frame_generation',
-      content: JSON.stringify({
-        frame_index: kf.frame_index,
-        cache_hit: false,
-        backend: result.backend,
-        duration_ms: result.durationMs
-      })
-    });
-  } catch (e) {
-    if (getTask(task.id)?.status === 'cancelled') {
-      updateKeyframe(kf.id, {
-        status: 'failed',
-        error_message: '已取消'
-      });
-      throw e;
-    }
-    updateKeyframe(kf.id, {
-      status: 'failed',
-      error_message: (e as Error).message
-    });
-    appendChatLog({
-      task_id: task.id,
-      role: 'system',
-      kind: 'error',
-      content: `第 ${kf.frame_index + 1} 帧生成失败: ${(e as Error).message}`
-    });
-    throw e;
-  }
-}
-
-async function generateImageWithRetry(
-  task: VideoTaskRow,
-  kf: KeyframeRow,
-  outPath: string,
-  initImagePath?: string
-): Promise<Awaited<ReturnType<typeof generateImage>>> {
-  const retries = Math.max(0, readInt(process.env.COMFYUI_FRAME_RETRIES, 2));
-  const retryDelayMs = readPositiveInt(process.env.COMFYUI_RETRY_DELAY_MS, 10_000);
-  const maxAttempts = 1 + retries;
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    throwIfCancelled(task.id);
-    try {
-      const attemptStartedAt = Date.now();
-      updateKeyframe(kf.id, {
-        status: 'generating',
-        error_message: attempt > 1 ? `第 ${attempt}/${maxAttempts} 次重试中…` : null
-      });
-      emit(task.id, 'frame', {
-        index: kf.frame_index,
-        status: 'generating',
-        frameId: kf.id,
-        attempt,
-        maxAttempts,
-        startedAt: attemptStartedAt,
-        elapsedMs: 0
-      });
-
-      const referenceInitImage =
-        initImagePath ??
-        (parseReferenceImagePaths(task.reference_image_path).find(p => fs.existsSync(p))
-          ? parseReferenceImagePaths(task.reference_image_path).find(p => fs.existsSync(p))
-          : undefined);
-
-      return await generateImage({
-        prompt: await ensureFrameGenerationPrompt(task, kf),
-        negativePrompt: task.generation_negative_prompt || process.env.COMFYUI_NEGATIVE || 'lowres, blurry, watermark, deformed',
-        seed: kf.seed,
-        width: task.width,
-        height: task.height,
-        outPath,
-        initImagePath: referenceInitImage,
-        onProgress: progress => {
-          emit(task.id, 'frame', {
-            index: kf.frame_index,
-            status: 'generating',
-            frameId: kf.id,
-            attempt,
-            maxAttempts,
-            startedAt: attemptStartedAt,
-            elapsedMs: progress.elapsedMs,
-            step: progress.value,
-            maxSteps: progress.max,
-            node: progress.node,
-            promptId: progress.promptId
-          });
-        }
-      });
-    } catch (e) {
-      lastError = e;
-      const message = (e as Error).message || String(e);
-      if (attempt >= maxAttempts) break;
-
-      updateKeyframe(kf.id, {
-        status: 'generating',
-        error_message: `第 ${attempt}/${maxAttempts} 次生成失败,${Math.round(retryDelayMs / 1000)} 秒后重试: ${message}`
-      });
-      appendChatLog({
-        task_id: task.id,
-        role: 'system',
-        kind: 'error',
-        content: `第 ${kf.frame_index + 1} 帧第 ${attempt}/${maxAttempts} 次生成失败,准备重试: ${message}`
-      });
-      emit(task.id, 'frame', {
-        index: kf.frame_index,
-        status: 'retrying',
-        frameId: kf.id,
-        attempt,
-        maxAttempts,
-        message
-      });
-      await sleep(retryDelayMs);
-    }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
-}
-
-async function ensureFrameGenerationPrompt(task: VideoTaskRow, kf: KeyframeRow): Promise<string> {
-  if (kf.generation_prompt?.trim()) return kf.generation_prompt;
-  const translated = await translateTextForGeneration({
-    text: kf.prompt,
-    taskPrompt: task.prompt,
-    frameIndex: kf.frame_index,
-    duration: task.duration,
-    motion: task.motion_type,
-    style: task.style
-  });
-  updateKeyframe(kf.id, { generation_prompt: translated.text });
-  if (translated.codexThreadId || translated.model) {
-    updateTask(task.id, {
-      codex_exec_thread_id: translated.codexThreadId ?? task.codex_exec_thread_id,
-      codex_exec_model: translated.model ?? task.codex_exec_model
-    });
-  }
-  return translated.text;
+  throw new Error('任务缺少关键帧规划,请重试任务');
 }
 
 /** 合成阶段 */
@@ -629,8 +288,8 @@ async function generateVideoForTask(
   const coverPath = path.join(taskDir(taskId), 'cover.jpg');
   const videoKey = videoCacheKey(task, keyframes, videoPrompt);
 
-  setTaskStatus(taskId, 'generating_motion', 'ComfyUI 视频模型生成中…', 10);
-  emit(taskId, 'status', { status: 'generating_motion', message: 'ComfyUI 视频模型生成中…', progress: 10 });
+  setTaskStatus(taskId, 'generating_motion', 'Wan 直接生成视频中…', 10);
+  emit(taskId, 'status', { status: 'generating_motion', message: 'Wan 直接生成视频中…', progress: 10 });
   for (const kf of keyframes) {
     updateKeyframe(kf.id, { status: 'generating', error_message: null });
     emit(taskId, 'frame', { index: kf.frame_index, status: 'generating', frameId: kf.id });
@@ -647,7 +306,7 @@ async function generateVideoForTask(
     const startedAt = Date.now();
     const result = await generateVideo({
       prompt: buildComfyVideoPrompt(task, videoPrompt, keyframes),
-      negativePrompt: negativePrompt || task.generation_negative_prompt || process.env.COMFYUI_NEGATIVE || 'lowres, blurry, watermark, text, deformed',
+      negativePrompt: negativePrompt || task.generation_negative_prompt || process.env.WAN_NEGATIVE || 'lowres, blurry, watermark, text, deformed',
       seed: task.seed ?? 0,
       width: task.width,
       height: task.height,
@@ -658,10 +317,10 @@ async function generateVideoForTask(
       referenceImagePath: referencePaths.find(p => fs.existsSync(p)),
       onProgress: progress => {
         const pct = 10 + Math.floor((progress.value / Math.max(1, progress.max)) * 55);
-        setTaskStatus(taskId, 'generating_motion', `ComfyUI 视频模型生成中 ${progress.value}/${progress.max}`, pct);
+        setTaskStatus(taskId, 'generating_motion', `Wan 直接生成视频中 ${progress.value}/${progress.max}`, pct);
         emit(taskId, 'status', {
           status: 'generating_motion',
-          message: `ComfyUI 视频模型生成中 ${progress.value}/${progress.max}`,
+          message: `Wan 直接生成视频中 ${progress.value}/${progress.max}`,
           progress: pct,
           elapsedMs: progress.elapsedMs,
           node: progress.node,
@@ -725,8 +384,8 @@ async function generateVideoForTask(
     role: 'orchestrator',
     kind: 'compose',
     content: JSON.stringify({
-      mode: 'comfyui_video',
-      model: process.env.COMFYUI_VIDEO_MODEL || 'wan2.2_ti2v_5B_fp16.safetensors',
+      mode: 'wan_direct',
+      model: process.env.WAN_MODEL_ID || 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers',
       cache_hit: cacheHit,
       video_key: videoKey,
       duration_ms: durationMs,
@@ -893,7 +552,7 @@ export async function regenerateKeyframe(
     height: task.height,
     style: task.style,
     reference_image_hash: refHash,
-    model: 'comfyui:regenerate:english:v3'
+    model: 'wan-direct:regenerate:english:v1'
   });
   updateKeyframe(frameId, {
     prompt: newPrompt,
@@ -927,7 +586,7 @@ function enqueueRegenerate(taskId: string, frameId: string): void {
       await generateVideoForTask(
         taskId,
         task.generation_prompt ?? task.prompt,
-        task.generation_negative_prompt ?? process.env.COMFYUI_NEGATIVE ?? 'lowres, blurry, watermark, text, deformed',
+        task.generation_negative_prompt ?? process.env.WAN_NEGATIVE ?? 'lowres, blurry, watermark, text, deformed',
         parseReferenceImagePaths(task.reference_image_path)
       );
     } catch (e) {
@@ -976,7 +635,7 @@ function readInt(value: string | undefined, fallback: number): number {
 }
 
 function resolveConsistencyMode(): 'none' | 'seed' | 'anchor' | 'previous' {
-  const value = process.env.COMFYUI_CONSISTENCY_MODE?.trim().toLowerCase();
+  const value = process.env.WAN_CONSISTENCY_MODE?.trim().toLowerCase();
   if (value === 'none' || value === 'seed' || value === 'anchor' || value === 'previous') return value;
   return 'previous';
 }
@@ -987,7 +646,7 @@ function resolveFrameSeed(seedBase: number, frameIndex: number, mode: 'none' | '
 }
 
 function resolveVideoFrameCount(task: VideoTaskRow): number {
-  const configured = readInt(process.env.COMFYUI_VIDEO_FRAMES, 0);
+  const configured = readInt(process.env.WAN_VIDEO_FRAMES, 0);
   if (configured > 0) return configured;
   return Math.max(41, Math.min(121, Math.round(task.duration * task.fps)));
 }

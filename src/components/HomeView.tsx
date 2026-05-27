@@ -38,7 +38,7 @@ const MOTIONS: { id: MotionType; label: string }[] = [
 interface Props {
   tasks: SerializedTask[];
   stats: HomeStats;
-  env: { comfyui: { url: string; configured: boolean; reachable: boolean; modelReady: boolean; checkpoints: string[]; videoModels: string[]; missingVideoModels: string[]; error?: string }; codex: boolean };
+  env: { wan: { configured: boolean; ready: boolean; python: string; script: string; modelId: string; error?: string }; codex: boolean };
 }
 
 interface ReferenceUpload {
@@ -142,13 +142,8 @@ export default function HomeView({ tasks, stats, env }: Props) {
   const confirmGenerate = useCallback(async () => {
     if (!plan) return;
     setErr(null);
-    if (!env.comfyui.reachable) {
-      setErr(`ComfyUI 未启动或不可访问 (${env.comfyui.url})。请运行 npm run comfyui:start,或在 .env.local 设置 COMFYUI_URL。`);
-      return;
-    }
-    if (!env.comfyui.modelReady) {
-      const missing = env.comfyui.missingVideoModels.length ? env.comfyui.missingVideoModels.join(', ') : 'Wan2.2 5B 视频模型';
-      setErr(`ComfyUI 已启动,但视频模型未就绪。缺少: ${missing}。请等待 Wan2.2 5B 下载完成后重启 ComfyUI。`);
+    if (!env.wan.ready) {
+      setErr(`Wan 直接生成后端未就绪: ${env.wan.error ?? '请配置 Python / CUDA / diffusers 环境'}`);
       return;
     }
     setBusy(true);
@@ -165,7 +160,7 @@ export default function HomeView({ tasks, stats, env }: Props) {
       setErr((e as Error).message);
       setBusy(false);
     }
-  }, [env.comfyui.modelReady, env.comfyui.reachable, env.comfyui.url, plan, router, taskPayload]);
+  }, [env.wan.error, env.wan.ready, plan, router, taskPayload]);
 
   const uploadReferences = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
@@ -424,11 +419,9 @@ export default function HomeView({ tasks, stats, env }: Props) {
             {references.length > 0 && <span>已上传 {references.length} 张参考图,第 1 张作为主锚定图</span>}
             <span className="grow" />
             <span>
-              {env.comfyui.modelReady
-                ? `🟢 ComfyUI 视频模型已就绪 (${env.comfyui.videoModels[0] ?? 'Wan2.2 5B'})`
-                : env.comfyui.reachable
-                  ? `🟡 ComfyUI 已启动,等待 Wan2.2 5B`
-                  : `🔴 ComfyUI 未启动 (${env.comfyui.url})`}
+              {env.wan.ready
+                ? `🟢 Wan 直接生成已就绪 (${env.wan.modelId})`
+                : `🟡 Wan 直接生成待配置`}
             </span>
             <span style={{ marginLeft: 12 }}>
               <kbd>⌘</kbd> + <kbd>⏎</kbd> 提交
@@ -505,7 +498,7 @@ export default function HomeView({ tasks, stats, env }: Props) {
         <div className="info-cell">
           <div className="label">外部服务</div>
           <div className="value" style={{ display: 'flex', gap: 8, fontSize: 14, fontWeight: 500 }}>
-            <span className={`badge ${env.comfyui.modelReady ? 'badge-success' : 'badge-warn'}`}><span className="badge-dot" />ComfyUI</span>
+            <span className={`badge ${env.wan.ready ? 'badge-success' : 'badge-warn'}`}><span className="badge-dot" />Wan</span>
             <span className={`badge ${env.codex ? 'badge-success' : 'badge-warn'}`}><span className="badge-dot" />Codex</span>
           </div>
           <div className="value-sub">FFmpeg · 本地</div>

@@ -3,6 +3,8 @@ node_modules/
 out/
 data/
 vendor/
+models/
+.venv-wan-cpu/
 *.log
 .env
 .env.local

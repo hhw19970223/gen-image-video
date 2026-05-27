@@ -34,7 +34,7 @@ export function keyframeCacheKey(opts: {
     h: opts.height,
     st: opts.style ?? '',
     ri: opts.reference_image_hash ?? '',
-    m: opts.model ?? 'comfyui-default'
+    m: opts.model ?? 'wan-direct'
   });
   return sha256Hex(payload).slice(0, 32);
 }

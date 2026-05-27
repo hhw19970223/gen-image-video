@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError, serializeTask, validateCreate } from '@/lib/api-helpers';
 import { enqueueTask } from '@/lib/orchestrator';
-import { checkComfyUI } from '@/lib/comfyui';
+import { checkWanDirect } from '@/lib/wan';
 import { homeStats, insertTask, listTasks } from '@/lib/repo';
 import type { TaskStatus } from '@/lib/types';
 
@@ -17,20 +17,11 @@ export async function POST(req: NextRequest) {
   }
   const v = validateCreate(body);
   if (!v.ok) return jsonError(400, v.error);
-  const comfyui = await checkComfyUI();
-  if (!comfyui.reachable) {
+  const wan = await checkWanDirect();
+  if (!wan.ready) {
     return jsonError(
       503,
-      `ComfyUI 未启动或不可访问 (${comfyui.url})。请运行 npm run comfyui:start,或在 .env.local 设置 COMFYUI_URL。`
-    );
-  }
-  if (!comfyui.modelReady) {
-    const missing = comfyui.missingVideoModels.length
-      ? comfyui.missingVideoModels.join(', ')
-      : 'Wan2.2 5B 视频模型';
-    return jsonError(
-      503,
-      `ComfyUI 已启动,但视频模型未就绪。缺少: ${missing}。请等待 Wan2.2 5B 下载完成后重启 ComfyUI。`
+      `Wan 直接生成后端未就绪: ${wan.error ?? '请配置 Python / CUDA / diffusers 环境'}`
     );
   }
   const task = insertTask(v.value);

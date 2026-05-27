@@ -1,36 +1,28 @@
-// 手动初始化数据库 / 检查环境
-// 用法: npm run init-db
-
-import { db } from './db';
 import { checkFfmpeg } from './adapters/ffmpeg';
-import { checkComfyUI } from './comfyui';
-import { homeStats } from './repo';
+import { db } from './db';
 import { DATA_DIR } from './paths';
+import { homeStats } from './repo';
+import { checkWanDirect } from './wan';
 
 async function main() {
   console.log('[init-db] DATA_DIR =', DATA_DIR);
-  // 触发 schema 初始化
   db().prepare('SELECT 1').get();
   console.log('[init-db] schema OK');
 
   const ff = await checkFfmpeg();
   if (ff.ok) console.log(`[init-db] ffmpeg OK · ${ff.version ?? 'unknown'}`);
-  else console.warn('[init-db] ffmpeg NOT FOUND — 视频合成将失败');
+  else console.warn('[init-db] ffmpeg NOT FOUND');
 
-  const comfyui = await checkComfyUI();
-  if (comfyui.reachable) {
-    console.log(`[init-db] comfyui OK · ${comfyui.url}`);
-    console.log(`[init-db] comfyui checkpoints · ${comfyui.checkpoints.length || 0}`);
-  }
-  else console.warn(`[init-db] comfyui NOT READY · ${comfyui.url}`);
+  const wan = await checkWanDirect();
+  if (wan.ready) console.log(`[init-db] wan direct OK · ${wan.modelId}`);
+  else console.warn(`[init-db] wan direct NOT READY · ${wan.error ?? 'unknown'}`);
 
   const stats = homeStats();
-  console.log(`[init-db] 当前: ${stats.monthCount} 任务/月 · ${stats.cacheKeyframes} 关键帧缓存 · ${Math.round(stats.cacheHitRate * 100)}% 命中`);
-
+  console.log(`[init-db] tasks this month: ${stats.monthCount}`);
   console.log('[init-db] env:');
-  console.log('  COMFYUI_URL =', process.env.COMFYUI_URL || '(默认 http://127.0.0.1:8188)');
-  console.log('  CODEX_BIN  =', process.env.CODEX_BIN || '(留空 → 规则 fallback)');
-  console.log('  FFMPEG_BIN =', process.env.FFMPEG_BIN || '(从 PATH 读取)');
+  console.log('  WAN_MODEL_ID =', process.env.WAN_MODEL_ID || 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers');
+  console.log('  CODEX_BIN    =', process.env.CODEX_BIN || '(fallback)');
+  console.log('  FFMPEG_BIN   =', process.env.FFMPEG_BIN || '(PATH)');
 }
 
 main().catch((e) => {

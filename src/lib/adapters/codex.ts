@@ -76,15 +76,15 @@ const SYSTEM_PROMPT = `你是一个 AI 视频创作多 Agent 编排组,不要写
 - Continuity Reviewer Agent: 确保所有关键帧保持同一个主体、同一身份/产品外观、同一材质、同一服装/包装、同一场景和光线连续性。
 
 任务:
-- 第一层必须是给用户二次确认的中文导演规划,不是 ComfyUI prompt。先写 animationDescription: 一段完整、顺滑、可执行的成片动画描述,明确在 duration 秒内画面如何开始、如何运动、如何过渡、如何收束。它要像导演给分镜师的说明,不能只是关键词堆叠。
+- 第一层必须是给用户二次确认的中文导演规划,不是 Wan prompt。先写 animationDescription: 一段完整、顺滑、可执行的成片动画描述,明确在 duration 秒内画面如何开始、如何运动、如何过渡、如何收束。它要像导演给分镜师的说明,不能只是关键词堆叠。
 - 第二层必须是给用户二次确认的中文逐帧定格描述 frameStills。按每秒 1 帧拆成 N 个定格画面,每一帧都写“这一秒暂停时画面应该是什么样”,而不是写模型提示词。每个 frameStill 必须包含 stillDescription、roleInAnimation、visualChange。
-- 第三层才是内部 ComfyUI 生成用 storyboard/comfyPrompt。它要从定格描述派生,但不要把它作为用户确认的主要内容。
+- 第三层才是内部 Wan 生成用 storyboard/comfyPrompt。它要从定格描述派生,但不要把它作为用户确认的主要内容。
 - 必须先做整支视频的总规划,说明这个视频最终应该是什么样: 核心概念、视觉风格、镜头语言、节奏、连续性约束、参考图使用方式。
 - 再把总规划拆成 N 张关键帧的时间轴分镜,每一秒一帧,每帧都必须是上一帧的自然推进,不能像独立海报。
 - 每条 storyboard.coreFrame 的“核心画面”必须足够细: 主体外观、数量、姿态/朝向、相对画面位置、前景/中景/背景关系、材质纹理、颜色、光源方向、阴影、高光、景深、镜头焦段、画面边缘可见元素都要写清楚。
 - 每一帧都要说明 previousToCurrentChange: “这一帧和上一帧相比具体变化了什么”,变化只能发生在镜头距离、角度、构图裁切、局部姿态、光影强弱或转场节奏,不能改变主体身份。
 - 每一帧都要写 continuityAnchor,明确哪些主体身份、材质、服装/包装、场景、光源方向、色彩关系必须延续到上一帧和下一帧。
-- 每一帧都要写 comfyPrompt,这是最终给 ComfyUI 的提示词,必须重复主体身份、核心画面细节、相对上一帧变化、必须不变的连续性锚点、镜头位置/裁切/焦段/光线/背景。不要用“同上”“保持一致”这种省略说法。
+- 每一帧都要写 comfyPrompt,这是最终给 Wan 的提示词,必须重复主体身份、核心画面细节、相对上一帧变化、必须不变的连续性锚点、镜头位置/裁切/焦段/光线/背景。不要用“同上”“保持一致”这种省略说法。
 - 每张关键帧体现镜头的渐进运动(zoom_in/zoom_out/pan/fade/crossfade 等),但不要改变主体身份。
 - 如果 has_reference_image 为 true,提示词要综合所有参考图；第一张是主锚定图,其他参考图用于补充主体细节、材质、配色、包装/服装、场景和光线信息。
 - 有多张参考图时,不要把它们画成多个并列主体,除非用户明确要求；默认融合为同一主体/同一产品的连续镜头约束。
@@ -303,16 +303,16 @@ async function runCodexTranslation(
   });
 }
 
-const TRANSLATION_PROMPT = `You are the internal prompt translator for a ComfyUI / SDXL video pipeline.
+const TRANSLATION_PROMPT = `You are the internal prompt translator for a direct Wan video pipeline.
 Translate the provided Chinese planning text into fluent, concrete English image-generation prompts.
 Do not expose explanations. Preserve all visual details, continuity constraints, frame-to-frame changes, camera state, lighting, materials, subject identity, and reference-image instructions.
 If the user requests two different subjects, especially animals such as a cat and a mouse, every frame prompt must explicitly state the exact requested subject count and species, for example: "exactly one cat and exactly one small mouse in the same frame, two different species, the mouse is much smaller than the cat, do not turn the mouse into a second cat".
 The user-facing plan stays in the original language; your output is only for internal generation.
 Return strict JSON only:
-{"videoPrompt":"English video-level generation summary","framePrompts":["English ComfyUI prompt 1"],"negativePrompt":"English negative prompt"}
+{"videoPrompt":"English video-level generation summary","framePrompts":["English Wan prompt 1"],"negativePrompt":"English negative prompt"}
 Rules:
 - framePrompts length must exactly match the input framePrompts length.
-- Each frame prompt must be directly usable by SDXL/ComfyUI.
+- Each frame prompt must be directly usable by Wan/video model.
 - Repeat subject identity and continuity anchors in every frame.
 - Do not use vague translation notes like "same as previous"; write the actual visual details again.
 - Keep product names, brand names, and proper nouns unchanged when present.
@@ -876,7 +876,7 @@ function fallbackPlan(input: CreateTaskInput, frameCount: number, motion: string
     agentSkills: fallbackAgentSkills(input),
     framePrompts,
     negativePrompt:
-      process.env.COMFYUI_NEGATIVE ||
+      process.env.WAN_NEGATIVE ||
       (isCatMouseFightPrompt(input.prompt)
         ? '低分辨率, 模糊, 水印, 文字, logo错乱, 畸形, 解剖错误, 主体漂移, 背景突变, 构图跳变, 噪点, 多出第二只猫, 多出第二只老鼠, 缺少猫, 缺少老鼠, 老鼠变成猫, 猫变成老鼠, 人物, 人像, 血腥, 受伤'
         : '低分辨率, 模糊, 水印, 文字, logo错乱, 畸形, 解剖错误, 多手指, 主体漂移, 背景突变, 构图跳变, 噪点'),
@@ -1040,16 +1040,16 @@ function fallbackSmoothAnimation(input: CreateTaskInput, frameCount: number, mot
       motionArc: `${motion} 作为主运动,镜头从能看清客厅木地板和双方距离的中全景,逐秒推进到猫爪与老鼠表情的近景; 每秒只推进一个小动作,避免跳切。`,
       timing: `0-${Math.max(1, Math.floor(frameCount * 0.2))} 秒建立猫鼠、线团、木地板和窗光; 中段让猫伸爪、老鼠闪躲、双方绕线团对峙; 最后 2-3 秒收束到猫爪停住、老鼠举奶酪反击的记忆点。`,
       transitionLogic: '每一帧都继承上一帧的猫鼠位置关系和光线方向,只改变爪子高度、老鼠跳跃方向、尾巴弧线、线团滚动角度或镜头裁切。不要突然换场景、换动物数量、换成肖像照或抽象海报。',
-      continuityStrategy: '每条 ComfyUI 提示词重复: exactly one ginger tabby cat, exactly one small gray-brown mouse, same living room wooden floor, same blue yarn ball, warm window light from upper right, no humans, no text。'
+      continuityStrategy: '每条 Wan 提示词重复: exactly one ginger tabby cat, exactly one small gray-brown mouse, same living room wooden floor, same blue yarn ball, warm window light from upper right, no humans, no text。'
     };
   }
   return {
     durationSeconds: input.duration,
     summary: `把用户描述“${input.prompt}”扩写成一段 ${input.duration}s 的丝滑短动画: 先用首帧建立主体、空间和光线基准,随后按每秒 1 帧连续推进镜头,最后以稳定、清晰的视觉锚点收束。`,
-    motionArc: `${motion} 作为主运动,所有帧只做小幅、可插值的镜头距离/角度/裁切/光影变化,让 ComfyUI 生成的关键帧能首尾串联。`,
+    motionArc: `${motion} 作为主运动,所有帧只做小幅、可插值的镜头距离/角度/裁切/光影变化,让 Wan 生成的关键帧能首尾串联。`,
     timing: `共 ${frameCount} 张关键帧,第 0 秒建立画面,中段逐步强化主体细节和情绪,最后 1-2 秒收束到最有记忆点的画面。`,
     transitionLogic: '每一帧都继承上一帧的主体、场景和光线,只推进一个明确变化点,避免跳切、换主体、换背景或突然新增元素。',
-    continuityStrategy: '在每条 ComfyUI 提示词中重复主体身份、材质、主要颜色、构图位置、主光方向、背景关系和前后帧连续性锚点。'
+    continuityStrategy: '在每条 Wan 提示词中重复主体身份、材质、主要颜色、构图位置、主光方向、背景关系和前后帧连续性锚点。'
   };
 }
 
@@ -1124,7 +1124,7 @@ function fallbackAgentSkills(input: CreateTaskInput): FramePlan['agentSkills'] {
     {
       agent: 'Image Prompt Agent',
       skill: '图像生成提示词细化',
-      output: '补足主体、构图、光影、材质、色彩、景深和镜头焦段,让提示词可直接给 ComfyUI 使用。'
+      output: '补足主体、构图、光影、材质、色彩、景深和镜头焦段,让提示词可直接给 Wan 使用。'
     },
     {
       agent: 'Animation Agent',

@@ -216,7 +216,7 @@ export async function extractFramesFromVideo(input: ExtractFramesInput): Promise
   ).filter(p => fs.existsSync(p));
 }
 
-/** Normalize a ComfyUI video output to browser-friendly mp4 when needed. */
+/** Normalize a Wan video output to browser-friendly mp4 when needed. */
 export async function transcodeVideoToMp4(input: TranscodeVideoInput): Promise<void> {
   fs.mkdirSync(path.dirname(input.outPath), { recursive: true });
   await runFfmpeg([
