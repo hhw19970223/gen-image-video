@@ -8,12 +8,12 @@ import type { AspectRatio, MotionType, Style } from '@/lib/types';
 import type { HomeStats, SerializedTask } from '@/lib/api-types';
 
 const TEMPLATES = [
-  { id: 'perfume', vis: 'vis-2', meta: '商品 · 美妆 / 香氛', ratio: '9:16' as AspectRatio, title: '香氛瓶 360° 旋转特写', desc: '8 关键帧、镜头自旋 + 推近,适合电商详情页头图视频。', prompt: '一瓶冷调香水在丝绸背景上缓慢旋转,顶光从左前方打入,镜头由远推近', motion: 'zoom_in' as MotionType, frames: 8, style: 'product_photography' as Style, duration: 6 },
-  { id: 'apparel', vis: 'vis-1', meta: '电商 · 服装 / 平铺到上身', ratio: '1:1' as AspectRatio, title: '平铺图 → 上身演绎', desc: '两张关键帧交叉溶解,小红书首图节奏,自动加圆角。', prompt: '一件麂皮米色夹克从平铺转向模特上身,自然光摄影棚,品牌片头质感', motion: 'crossfade' as MotionType, frames: 4, style: 'product_photography' as Style, duration: 5 },
-  { id: 'beverage', vis: 'vis-6', meta: '美食 · 流体特写', ratio: '9:16' as AspectRatio, title: '饮品倾倒慢镜头', desc: '6 关键帧 + 插帧,液体下落顺滑,TikTok / 抖音节奏。', prompt: '柚子苏打从透明瓶中缓慢倾倒,晶莹气泡在杯中翻涌,微距特写,清晨柔光', motion: 'zoom_in' as MotionType, frames: 6, style: 'product_photography' as Style, duration: 6 },
-  { id: 'gadget', vis: 'vis-4', meta: '科技 / 数码 · 开箱节奏', ratio: '16:9' as AspectRatio, title: '数码产品开箱光影', desc: '深紫调 + 高光扫过,4 关键帧节奏,B 站 / YouTube 头图。', prompt: '黑色无人机从礼盒中缓缓升起,深紫氛围灯,高光扫过金属机身', motion: 'fade' as MotionType, frames: 4, style: 'cinematic' as Style, duration: 5 },
+  { id: 'perfume', vis: 'vis-2', meta: '商品 · 美妆 / 香氛', ratio: '9:16' as AspectRatio, title: '香氛瓶 360° 旋转特写', desc: '镜头自旋 + 推近,适合电商详情页头图视频。', prompt: '一瓶冷调香水在丝绸背景上缓慢旋转,顶光从左前方打入,镜头由远推近', motion: 'zoom_in' as MotionType, frames: 8, style: 'product_photography' as Style, duration: 6 },
+  { id: 'apparel', vis: 'vis-1', meta: '电商 · 服装 / 平铺到上身', ratio: '1:1' as AspectRatio, title: '平铺图 → 上身演绎', desc: '从平铺自然过渡到上身展示,小红书首图节奏。', prompt: '一件麂皮米色夹克从平铺转向模特上身,自然光摄影棚,品牌片头质感', motion: 'crossfade' as MotionType, frames: 4, style: 'product_photography' as Style, duration: 5 },
+  { id: 'beverage', vis: 'vis-6', meta: '美食 · 流体特写', ratio: '9:16' as AspectRatio, title: '饮品倾倒慢镜头', desc: '液体下落顺滑,TikTok / 抖音节奏。', prompt: '柚子苏打从透明瓶中缓慢倾倒,晶莹气泡在杯中翻涌,微距特写,清晨柔光', motion: 'zoom_in' as MotionType, frames: 6, style: 'product_photography' as Style, duration: 6 },
+  { id: 'gadget', vis: 'vis-4', meta: '科技 / 数码 · 开箱节奏', ratio: '16:9' as AspectRatio, title: '数码产品开箱光影', desc: '深紫调 + 高光扫过,B 站 / YouTube 头图。', prompt: '黑色无人机从礼盒中缓缓升起,深紫氛围灯,高光扫过金属机身', motion: 'fade' as MotionType, frames: 4, style: 'cinematic' as Style, duration: 5 },
   { id: 'brand', vis: 'vis-3', meta: '品牌 · 微动画 / 主视觉', ratio: '16:9' as AspectRatio, title: '品牌主视觉淡入', desc: '极简渐变 + 平移,适合活动页头图、Hero 视频背景。', prompt: '抽象品牌主视觉,蓝绿渐变从左下平移至右上,极简几何形状缓慢漂移', motion: 'pan_right' as MotionType, frames: 4, style: 'cartoon' as Style, duration: 5 },
-  { id: 'snack', vis: 'vis-5', meta: '食品 · 包装即视感', ratio: '9:16' as AspectRatio, title: '包装产品摆拍 → 推近', desc: '6 关键帧、单点光源,适合零食 / 饮料 / 美妆陈列。', prompt: '红色饮料铝罐立于木质台面,逆光柔焦背景,镜头从中景推到极近特写', motion: 'zoom_in' as MotionType, frames: 6, style: 'product_photography' as Style, duration: 6 }
+  { id: 'snack', vis: 'vis-5', meta: '食品 · 包装即视感', ratio: '9:16' as AspectRatio, title: '包装产品摆拍 → 推近', desc: '单点光源和顺滑推近,适合零食 / 饮料 / 美妆陈列。', prompt: '红色饮料铝罐立于木质台面,逆光柔焦背景,镜头从中景推到极近特写', motion: 'zoom_in' as MotionType, frames: 6, style: 'product_photography' as Style, duration: 6 }
 ];
 
 const RATIOS: AspectRatio[] = ['9:16', '16:9', '1:1'];
@@ -38,7 +38,19 @@ const MOTIONS: { id: MotionType; label: string }[] = [
 interface Props {
   tasks: SerializedTask[];
   stats: HomeStats;
-  env: { wan: { configured: boolean; ready: boolean; python: string; script: string; modelId: string; error?: string }; codex: boolean };
+  env: {
+    wan: {
+      configured: boolean;
+      ready: boolean;
+      backend?: string;
+      url?: string;
+      model?: string;
+      clip?: string;
+      vae?: string;
+      error?: string;
+    };
+    codex: boolean;
+  };
 }
 
 interface ReferenceUpload {
@@ -65,25 +77,7 @@ interface ConfirmedPlan {
     transitionLogic: string;
     continuityStrategy: string;
   };
-  storyboard?: Array<{
-    frameIndex: number;
-    timeSec: number;
-    coreFrame: string;
-    previousToCurrentChange: string;
-    cameraState: string;
-    subjectState: string;
-    continuityAnchor: string;
-    comfyPrompt: string;
-  }>;
-  frameStills?: Array<{
-    frameIndex: number;
-    timeSec: number;
-    stillDescription: string;
-    roleInAnimation: string;
-    visualChange: string;
-  }>;
   agentSkills: Array<{ agent: string; skill: string; output: string }>;
-  framePrompts: string[];
   negativePrompt: string;
   notes: string;
   source?: 'codex' | 'fallback';
@@ -105,7 +99,6 @@ export default function HomeView({ tasks, stats, env }: Props) {
   const [plan, setPlan] = useState<ConfirmedPlan | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const frames = duration;
 
   useEffect(() => {
     let alive = true;
@@ -137,10 +130,9 @@ export default function HomeView({ tasks, stats, env }: Props) {
     duration,
     style,
     motion_type: motion,
-    frame_count: frames,
     fps: 24,
     reference_image_paths: references.map(ref => ref.path)
-  }), [duration, frames, motion, prompt, ratio, references, style]);
+  }), [duration, motion, prompt, ratio, references, style]);
 
   const requestPlan = useCallback(async () => {
     setErr(null);
@@ -169,11 +161,11 @@ export default function HomeView({ tasks, stats, env }: Props) {
     if (!plan) return;
     setErr(null);
     if (wanChecking) {
-      setErr('Wan 直接生成后端正在检测中,请稍等几秒后再开始生成');
+      setErr('ComfyUI GGUF 后端正在检测中,请稍等几秒后再开始生成');
       return;
     }
     if (!wanStatus.ready) {
-      setErr(`Wan 直接生成后端未就绪: ${wanStatus.error ?? '请配置 Python / CUDA / diffusers 环境'}`);
+      setErr(`ComfyUI GGUF 后端未就绪: ${wanStatus.error ?? '请启动 ComfyUI 并安装 GGUF 工作流节点'}`);
       return;
     }
     setBusy(true);
@@ -239,26 +231,7 @@ export default function HomeView({ tasks, stats, env }: Props) {
   const styleLabel = STYLES.find(s => s.id === style)?.label;
   const motionLabel = MOTIONS.find(m => m.id === motion)?.label;
   const totalSec = duration;
-  const estTime = `~${Math.round(totalSec * 6 + frames * 6)}s`;
-  const previewFrameStills = plan
-    ? plan.frameStills?.length
-      ? plan.frameStills
-      : plan.storyboard?.length
-        ? plan.storyboard.map(item => ({
-          frameIndex: item.frameIndex,
-          timeSec: item.timeSec,
-          stillDescription: item.coreFrame,
-          roleInAnimation: item.subjectState,
-          visualChange: item.previousToCurrentChange
-        }))
-        : plan.framePrompts.map((item, index) => ({
-          frameIndex: index,
-          timeSec: index,
-          stillDescription: item,
-          roleInAnimation: '',
-          visualChange: ''
-        }))
-    : [];
+  const estTime = `~${Math.round(totalSec * 12)}s`;
 
   return (
     <>
@@ -270,8 +243,8 @@ export default function HomeView({ tasks, stats, env }: Props) {
               把一句话<br />变成一段<em>会动的故事</em>。
             </h1>
             <p className="hero-sub" style={{ marginTop: 14 }}>
-              关键帧生成 + 简单动画 + 插帧合成。普通笔记本也能跑的 AI 短视频工作流,
-              先生图、再动起来,缓存复用降低 80% 重复成本。
+              Codex 先整理完整视频规划,用户确认后交给 ComfyUI GGUF 生成整段视频。
+              流程更短,更贴近视频模型。
             </p>
           </div>
           <div className="hero-stats">
@@ -357,7 +330,7 @@ export default function HomeView({ tasks, stats, env }: Props) {
                   </button>
                 ))}
               </div>
-              <span className="chip">每秒 1 帧 · {frames} 帧</span>
+              <span className="chip">ComfyUI GGUF</span>
               <SelectChip
                 value={style}
                 onChange={v => { setStyle(v as Style); setPlan(null); }}
@@ -395,7 +368,7 @@ export default function HomeView({ tasks, stats, env }: Props) {
                     确认并开始生成
                   </button>
                 </div>
-                <div className="plan-preview-grid">
+                <div className="plan-preview-grid plan-preview-grid-video">
                   <div>
                     <h4>成片应该是什么样</h4>
                     <p><strong>概念:</strong> {plan.overallPlan.concept}</p>
@@ -403,9 +376,11 @@ export default function HomeView({ tasks, stats, env }: Props) {
                     <p><strong>镜头:</strong> {plan.overallPlan.cameraLanguage}</p>
                     <p><strong>串联:</strong> {plan.overallPlan.continuityRules}</p>
                     {plan.overallPlan.referenceUsage && <p><strong>参考图:</strong> {plan.overallPlan.referenceUsage}</p>}
+                  </div>
+                  <div>
                     {plan.animationDescription && (
                       <>
-                        <h4 style={{ marginTop: 14 }}>整段动画描述</h4>
+                        <h4>整段动画描述</h4>
                         <p>{plan.animationDescription}</p>
                       </>
                     )}
@@ -417,18 +392,6 @@ export default function HomeView({ tasks, stats, env }: Props) {
                         <p><strong>过渡逻辑:</strong> {plan.smoothAnimation.transitionLogic}</p>
                       </>
                     )}
-                  </div>
-                  <div>
-                    <h4>每秒定格画面</h4>
-                    <ol>
-                      {previewFrameStills.map((item, index) => (
-                        <li key={index}>
-                          <strong>{item.timeSec}s 定格:</strong> {item.stillDescription}
-                          {item.roleInAnimation && <p><strong>这一帧的作用:</strong> {item.roleInAnimation}</p>}
-                          {item.visualChange && <p><strong>相对上一帧:</strong> {item.visualChange}</p>}
-                        </li>
-                      ))}
-                    </ol>
                   </div>
                 </div>
                 <div className="agent-strip">
@@ -443,17 +406,19 @@ export default function HomeView({ tasks, stats, env }: Props) {
           </div>
           <div className="composer-foot">
             <span>
-              预计生成 <strong className="tab-num" style={{ color: 'var(--fg)' }}>{frames}</strong> 张关键帧 · 每秒 1 帧 ·
-              <span className="tab-num"> 24fps</span> · 720p · 估时 <span className="tab-num">{estTime}</span>
+              预计生成 <strong className="tab-num" style={{ color: 'var(--fg)' }}>{duration}s</strong> 视频 ·
+              <span className="tab-num"> 24fps</span> · ComfyUI GGUF · 估时 <span className="tab-num">{estTime}</span>
             </span>
             {references.length > 0 && <span>已上传 {references.length} 张参考图,第 1 张作为主锚定图</span>}
             <span className="grow" />
-            <span>
+            <span title={!wanStatus.ready ? wanStatus.error : undefined}>
               {wanStatus.ready
-                ? `🟢 Wan 直接生成已就绪 (${wanStatus.modelId})`
+                ? `🟢 ComfyUI GGUF 已就绪 (${wanStatus.model ?? 'Wan 1.3B'})`
                 : wanChecking
-                  ? `🟡 Wan 直接生成检测中`
-                : `🟡 Wan 直接生成待配置`}
+                  ? `🟡 ComfyUI GGUF 检测中`
+                : wanStatus.configured
+                  ? `🟡 ComfyUI GGUF 未就绪: ${wanStatus.error ?? '请检查 ComfyUI 状态'}`
+                  : `🟡 ComfyUI GGUF 待配置`}
             </span>
             <span style={{ marginLeft: 12 }}>
               <kbd>⌘</kbd> + <kbd>⏎</kbd> 提交
@@ -518,19 +483,19 @@ export default function HomeView({ tasks, stats, env }: Props) {
           <div className="value-sub">视频任务 · 月度统计</div>
         </div>
         <div className="info-cell">
-          <div className="label">关键帧缓存</div>
+          <div className="label">视频缓存</div>
           <div className="value tab-num">{stats.cacheKeyframes.toLocaleString()}</div>
-          <div className="value-sub">命中即跳过生图</div>
+          <div className="value-sub">命中即复用成片</div>
         </div>
         <div className="info-cell">
           <div className="label">缓存命中率</div>
           <div className="value tab-num">{Math.round(stats.cacheHitRate * 100)}%</div>
-          <div className="value-sub">所有关键帧累计</div>
+          <div className="value-sub">所有任务累计</div>
         </div>
         <div className="info-cell">
           <div className="label">外部服务</div>
           <div className="value" style={{ display: 'flex', gap: 8, fontSize: 14, fontWeight: 500 }}>
-            <span className={`badge ${wanStatus.ready ? 'badge-success' : 'badge-warn'}`}><span className="badge-dot" />Wan{wanChecking && ' 检测中'}</span>
+            <span className={`badge ${wanStatus.ready ? 'badge-success' : 'badge-warn'}`}><span className="badge-dot" />ComfyUI GGUF{wanChecking && ' 检测中'}</span>
             <span className={`badge ${env.codex ? 'badge-success' : 'badge-warn'}`}><span className="badge-dot" />Codex</span>
           </div>
           <div className="value-sub">FFmpeg · 本地</div>

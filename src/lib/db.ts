@@ -92,6 +92,29 @@ function initSchema(d: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_chat_task ON chat_logs(task_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS codex_sessions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      codex_thread_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_codex_sessions_thread ON codex_sessions(codex_thread_id);
+    CREATE INDEX IF NOT EXISTS idx_codex_sessions_status ON codex_sessions(status, updated_at);
+
+    CREATE TABLE IF NOT EXISTS codex_messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+      task_id TEXT,
+      role TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      content TEXT NOT NULL,
+      codex_thread_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_codex_messages_session ON codex_messages(session_id, created_at);
   `);
 
   ensureColumn(d, 'video_tasks', 'codex_app_thread_id', 'TEXT');

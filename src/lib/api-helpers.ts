@@ -40,9 +40,6 @@ export function validateCreate(body: unknown): { ok: true; value: CreateTaskInpu
   if (!Number.isInteger(frameCount) || frameCount < 3 || frameCount > 60) {
     return { ok: false, error: 'frame_count 必须在 3 - 60 之间' };
   }
-  if (frameCount !== duration) {
-    return { ok: false, error: 'frame_count 必须等于 duration, 当前按每秒 1 帧生成' };
-  }
   if (b.style !== undefined && b.style !== null && !STYLES.includes(b.style as Style)) {
     return { ok: false, error: `style 必须是 ${STYLES.join('/')}` };
   }
@@ -69,41 +66,12 @@ export function validateCreate(body: unknown): { ok: true; value: CreateTaskInpu
 function validateConfirmedPlan(value: unknown, frameCount: number): CreateTaskInput['confirmed_plan'] {
   if (!value || typeof value !== 'object') return undefined;
   const raw = value as Record<string, unknown>;
-  const framePrompts = Array.isArray(raw.framePrompts) ? raw.framePrompts.map(String) : [];
-  if (framePrompts.length !== frameCount) return undefined;
   const overallRaw = raw.overallPlan && typeof raw.overallPlan === 'object'
     ? raw.overallPlan as Record<string, unknown>
     : {};
   const smoothRaw = raw.smoothAnimation && typeof raw.smoothAnimation === 'object'
     ? raw.smoothAnimation as Record<string, unknown>
     : null;
-  const storyboard = Array.isArray(raw.storyboard)
-    ? raw.storyboard.slice(0, frameCount).map((item, index) => {
-      const frame = item && typeof item === 'object' ? item as Record<string, unknown> : {};
-      return {
-        frameIndex: Number.isFinite(Number(frame.frameIndex)) ? Number(frame.frameIndex) : index,
-        timeSec: Number.isFinite(Number(frame.timeSec)) ? Number(frame.timeSec) : index,
-        coreFrame: String(frame.coreFrame ?? ''),
-        previousToCurrentChange: String(frame.previousToCurrentChange ?? ''),
-        cameraState: String(frame.cameraState ?? ''),
-        subjectState: String(frame.subjectState ?? ''),
-        continuityAnchor: String(frame.continuityAnchor ?? ''),
-        comfyPrompt: String(frame.comfyPrompt ?? framePrompts[index] ?? '')
-      };
-    })
-    : undefined;
-  const frameStills = Array.isArray(raw.frameStills)
-    ? raw.frameStills.slice(0, frameCount).map((item, index) => {
-      const frame = item && typeof item === 'object' ? item as Record<string, unknown> : {};
-      return {
-        frameIndex: Number.isFinite(Number(frame.frameIndex)) ? Number(frame.frameIndex) : index,
-        timeSec: Number.isFinite(Number(frame.timeSec)) ? Number(frame.timeSec) : index,
-        stillDescription: String(frame.stillDescription ?? ''),
-        roleInAnimation: String(frame.roleInAnimation ?? ''),
-        visualChange: String(frame.visualChange ?? '')
-      };
-    })
-    : undefined;
   const agentSkills = Array.isArray(raw.agentSkills)
     ? raw.agentSkills.map(item => {
       const skill = item && typeof item === 'object' ? item as Record<string, unknown> : {};
@@ -133,10 +101,7 @@ function validateConfirmedPlan(value: unknown, frameCount: number): CreateTaskIn
         continuityStrategy: String(smoothRaw.continuityStrategy ?? '')
       }
       : undefined,
-    storyboard: storyboard && storyboard.length === frameCount ? storyboard : undefined,
-    frameStills: frameStills && frameStills.length === frameCount ? frameStills : undefined,
     agentSkills,
-    framePrompts,
     negativePrompt: String(raw.negativePrompt ?? ''),
     notes: String(raw.notes ?? ''),
     source: raw.source === 'codex' || raw.source === 'fallback' ? raw.source : undefined,

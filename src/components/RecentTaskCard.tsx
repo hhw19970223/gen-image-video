@@ -8,9 +8,9 @@ type T = SerializedTask;
 const STATUS_BADGE: Record<string, { className: string; text: string }> = {
   pending: { className: 'badge-warn', text: '排队中' },
   planning: { className: 'badge-violet', text: '规划中' },
-  generating_keyframes: { className: 'badge-violet', text: '生成关键帧' },
-  generating_motion: { className: 'badge-violet', text: '生成动画帧' },
-  composing_video: { className: 'badge-warn', text: '合成视频中' },
+  generating_keyframes: { className: 'badge-violet', text: '生成视频' },
+  generating_motion: { className: 'badge-violet', text: '生成视频' },
+  composing_video: { className: 'badge-warn', text: '处理视频' },
   completed: { className: 'badge-success', text: '已完成' },
   failed: { className: 'badge-danger', text: '失败' },
   cancelled: { className: 'badge-danger', text: '已取消' }
@@ -73,11 +73,7 @@ export default function RecentTaskCard({ task: t }: { task: T }) {
           <span>·</span>
           <span className="tab-num">{t.aspect_ratio} · {t.duration}s · {t.fps}fps</span>
           <span className="grow" />
-          {t.cache_keyframe_hits > 0 && (
-            <span className="badge badge-accent" style={{ height: 18, fontSize: 10.5, padding: '0 6px' }}>
-              缓存 {t.cache_keyframe_hits}/{t.frame_count}
-            </span>
-          )}
+          {t.cache_video_hit && <span className="badge badge-accent" style={{ height: 18, fontSize: 10.5, padding: '0 6px' }}>视频缓存</span>}
         </div>
       </div>
     </Link>

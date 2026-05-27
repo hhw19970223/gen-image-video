@@ -7,6 +7,8 @@ import type {
   CacheRow,
   CacheType,
   ChatLogRow,
+  CodexMessageRow,
+  CodexSessionRow,
   CreateTaskInput,
   KeyframeRow,
   TaskStatus,
@@ -294,6 +296,91 @@ export function listChatLogs(taskId: string): ChatLogRow[] {
   return db()
     .prepare(`SELECT * FROM chat_logs WHERE task_id = ? ORDER BY created_at ASC`)
     .all(taskId) as ChatLogRow[];
+}
+
+// ===== Codex sessions =====
+
+export function getActiveCodexSession(): CodexSessionRow {
+  const existing = db()
+    .prepare(`SELECT * FROM codex_sessions WHERE status = 'active' ORDER BY updated_at DESC LIMIT 1`)
+    .get() as CodexSessionRow | undefined;
+  if (existing) return existing;
+  return createCodexSession('默认 Codex 会话');
+}
+
+export function createCodexSession(title: string): CodexSessionRow {
+  const id = `cdx_${nanoid(10)}`;
+  db()
+    .prepare(
+      `INSERT INTO codex_sessions (id, title, status)
+       VALUES (@id, @title, 'active')`
+    )
+    .run({ id, title: title.trim() || 'Codex 会话' });
+  return getCodexSession(id)!;
+}
+
+export function getCodexSession(id: string): CodexSessionRow | undefined {
+  return db()
+    .prepare(`SELECT * FROM codex_sessions WHERE id = ?`)
+    .get(id) as CodexSessionRow | undefined;
+}
+
+export function listCodexSessions(limit = 50): CodexSessionRow[] {
+  return db()
+    .prepare(`SELECT * FROM codex_sessions ORDER BY updated_at DESC LIMIT ?`)
+    .all(limit) as CodexSessionRow[];
+}
+
+export function updateCodexSession(id: string, patch: Partial<Pick<CodexSessionRow, 'title' | 'codex_thread_id' | 'status'>>): void {
+  const keys = Object.keys(patch).filter(k => patch[k as keyof typeof patch] !== undefined);
+  if (keys.length === 0) return;
+  const setClause = keys.map(k => `${k} = @${k}`).join(', ');
+  db()
+    .prepare(`UPDATE codex_sessions SET ${setClause}, updated_at = datetime('now') WHERE id = @id`)
+    .run({ ...patch, id });
+}
+
+export function activateCodexSession(id: string): CodexSessionRow | undefined {
+  db()
+    .prepare(`UPDATE codex_sessions SET updated_at = datetime('now') WHERE id = ?`)
+    .run(id);
+  return getCodexSession(id);
+}
+
+export function appendCodexMessage(row: Omit<CodexMessageRow, 'id' | 'created_at'>): CodexMessageRow {
+  const id = `cdm_${nanoid(10)}`;
+  db()
+    .prepare(
+      `INSERT INTO codex_messages
+         (id, session_id, task_id, role, kind, content, codex_thread_id)
+       VALUES
+         (@id, @session_id, @task_id, @role, @kind, @content, @codex_thread_id)`
+    )
+    .run({ id, ...row });
+  updateCodexSession(row.session_id, { codex_thread_id: row.codex_thread_id ?? undefined });
+  return db().prepare(`SELECT * FROM codex_messages WHERE id = ?`).get(id) as CodexMessageRow;
+}
+
+export function listCodexMessages(sessionId: string, limit = 200): CodexMessageRow[] {
+  return db()
+    .prepare(
+      `SELECT * FROM codex_messages
+       WHERE session_id = ?
+       ORDER BY created_at ASC
+       LIMIT ?`
+    )
+    .all(sessionId, limit) as CodexMessageRow[];
+}
+
+export function deleteCodexSession(id: string): void {
+  db().prepare(`DELETE FROM codex_sessions WHERE id = ?`).run(id);
+}
+
+export function renameCodexSession(id: string, title: string): CodexSessionRow | undefined {
+  const trimmed = title.trim();
+  if (!trimmed) return getCodexSession(id);
+  updateCodexSession(id, { title: trimmed });
+  return getCodexSession(id);
 }
 
 // ===== Aggregates =====

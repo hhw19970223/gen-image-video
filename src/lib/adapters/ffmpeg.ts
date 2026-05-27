@@ -1,23 +1,16 @@
-// FFmpeg 视频合成适配器
-//
-// MVP 实现:把 N 张关键帧按 motion 类型合成为 mp4
-//   默认使用稳定静态段 + xfade 交叉溶解。
-//   不在每张关键帧上单独做 zoompan,避免相邻段叠加时产生漂移/抖动。
-//
-// 预留 RIFE 插帧接口 (process.env.RIFE_ENABLED=true 时尝试调用,失败降级)
-
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { logError, logInfo, stepTimer } from '../logger';
 import type { MotionType } from '../types';
 
 export interface ComposeInput {
-  framePaths: string[]; // sorted by frame_index
+  framePaths: string[];
   outPath: string;
   width: number;
   height: number;
   fps: number;
-  duration: number; // seconds
+  duration: number;
   motion: MotionType;
 }
 
@@ -40,6 +33,7 @@ export interface ExtractFramesInput {
 export interface TranscodeVideoInput {
   inputPath: string;
   outPath: string;
+  fps?: number;
 }
 
 const FFMPEG_BIN = resolveFfmpegBin();
@@ -57,32 +51,53 @@ function resolveFfmpegBin(): string {
 
 export async function composeVideo(input: ComposeInput): Promise<ComposeResult> {
   const t0 = Date.now();
-  if (input.framePaths.length === 0) throw new Error('no frames to compose');
-  fs.mkdirSync(path.dirname(input.outPath), { recursive: true });
-
-  const args = buildFfmpegArgs(input);
-  await runFfmpeg(args);
-
-  return {
+  const timer = stepTimer('ffmpeg', 'composeVideo', {
     outPath: input.outPath,
-    durationMs: Date.now() - t0,
-    segments: input.framePaths.length,
-    rifeUsed: false
-  };
+    frameCount: input.framePaths.length,
+    width: input.width,
+    height: input.height,
+    fps: input.fps,
+    duration: input.duration,
+    motion: input.motion
+  });
+
+  try {
+    if (input.framePaths.length === 0) throw new Error('no frames to compose');
+    fs.mkdirSync(path.dirname(input.outPath), { recursive: true });
+
+    const args = buildFfmpegArgs(input);
+    await runFfmpeg(args, {
+      operation: 'composeVideo',
+      outPath: input.outPath,
+      frameCount: input.framePaths.length
+    });
+
+    const stat = fs.existsSync(input.outPath) ? fs.statSync(input.outPath) : null;
+    const durationMs = Date.now() - t0;
+    timer.done({ outPath: input.outPath, durationMs, bytes: stat?.size ?? null });
+
+    return {
+      outPath: input.outPath,
+      durationMs,
+      segments: input.framePaths.length,
+      rifeUsed: false
+    };
+  } catch (error) {
+    timer.fail(error, { outPath: input.outPath });
+    throw error;
+  }
 }
 
 function buildFfmpegArgs(input: ComposeInput): string[] {
   const { framePaths, outPath, width, height, fps, duration } = input;
   const N = framePaths.length;
-  const perFrame = duration / N; // 每帧持续秒数(单镜头 + 转场)
+  const perFrame = duration / N;
 
-  // 输入: 每张关键帧作为静态图片 input
   const inputArgs: string[] = [];
   for (const p of framePaths) {
     inputArgs.push('-loop', '1', '-t', String(perFrame.toFixed(3)), '-i', p);
   }
 
-  // filter_complex: 每张图生成一段稳定静态视频,然后用 xfade 链接。
   const filters: string[] = [];
   for (let i = 0; i < N; i++) {
     filters.push(
@@ -93,11 +108,9 @@ function buildFfmpegArgs(input: ComposeInput): string[] {
     );
   }
 
-  // 链式 xfade: v0 + v1 -> x1; x1 + v2 -> x2; ...
-  // 用 fade 做真正的交叉溶解；fadeblack 会在每段之间插入黑场。
   const xfade = 'fade';
   const xfadeDur = Math.min(0.6, perFrame * 0.4);
-  let lastTag = `v0`;
+  let lastTag = 'v0';
   let cumOffset = perFrame - xfadeDur;
   for (let i = 1; i < N; i++) {
     const out = i === N - 1 ? 'vout' : `x${i}`;
@@ -107,7 +120,7 @@ function buildFfmpegArgs(input: ComposeInput): string[] {
     lastTag = out;
     cumOffset += perFrame - xfadeDur;
   }
-  if (N === 1) filters.push(`[v0]copy[vout]`);
+  if (N === 1) filters.push('[v0]copy[vout]');
 
   return [
     '-y',
@@ -173,79 +186,159 @@ function readMotionIntensity(): number {
   return Math.max(0.2, Math.min(3, parsed));
 }
 
-function runFfmpeg(args: string[]): Promise<void> {
+function runFfmpeg(args: string[], meta: Record<string, unknown> = {}): Promise<void> {
   return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    logInfo('ffmpeg', 'process.spawn', {
+      bin: FFMPEG_BIN,
+      argsCount: args.length,
+      output: args[args.length - 1],
+      ...meta
+    });
+
     const child = spawn(FFMPEG_BIN, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false
     });
     let err = '';
     child.stderr.on('data', (d: Buffer) => (err += d.toString('utf8')));
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) return resolve();
-      reject(new Error(`ffmpeg exited ${code}: ${err.slice(-1200)}`));
+    child.on('error', error => {
+      logError('ffmpeg', 'process.spawnError', error, meta);
+      reject(error);
+    });
+    child.on('close', code => {
+      const elapsedMs = Date.now() - startedAt;
+      if (code === 0) {
+        logInfo('ffmpeg', 'process.done', { code, elapsedMs, ...meta });
+        return resolve();
+      }
+
+      const error = new Error(`ffmpeg exited ${code}: ${err.slice(-1200)}`);
+      logError('ffmpeg', 'process.failed', error, {
+        code,
+        elapsedMs,
+        stderrTail: err.slice(-4000),
+        ...meta
+      });
+      reject(error);
     });
   });
 }
 
-/** 用 ffmpeg 抓第一帧作为视频封面 */
 export async function extractCover(videoPath: string, coverPath: string): Promise<void> {
-  fs.mkdirSync(path.dirname(coverPath), { recursive: true });
-  await runFfmpeg(['-y', '-i', videoPath, '-vframes', '1', '-q:v', '2', coverPath]);
+  const timer = stepTimer('ffmpeg', 'extractCover', { videoPath, coverPath });
+  try {
+    fs.mkdirSync(path.dirname(coverPath), { recursive: true });
+    await runFfmpeg(['-y', '-i', videoPath, '-vframes', '1', '-q:v', '2', coverPath], {
+      operation: 'extractCover',
+      videoPath,
+      coverPath
+    });
+    const stat = fs.existsSync(coverPath) ? fs.statSync(coverPath) : null;
+    timer.done({ coverPath, bytes: stat?.size ?? null });
+  } catch (error) {
+    timer.fail(error, { videoPath, coverPath });
+    throw error;
+  }
 }
 
-/** 从已生成的视频里按时间均匀抽出关键帧,用于前端图册展示。 */
 export async function extractFramesFromVideo(input: ExtractFramesInput): Promise<string[]> {
-  if (input.frameCount <= 0) return [];
-  fs.mkdirSync(input.outDir, { recursive: true });
-  const outPattern = path.join(input.outDir, 'frame_%03d.png');
-  const fps = input.frameCount / Math.max(0.001, input.duration);
-  await runFfmpeg([
-    '-y',
-    '-i',
-    input.videoPath,
-    '-vf',
-    `fps=${fps.toFixed(6)},scale=${input.width}:${input.height}:force_original_aspect_ratio=increase,crop=${input.width}:${input.height}`,
-    '-frames:v',
-    String(input.frameCount),
-    outPattern
-  ]);
-  return Array.from({ length: input.frameCount }, (_, index) =>
-    path.join(input.outDir, `frame_${String(index + 1).padStart(3, '0')}.png`)
-  ).filter(p => fs.existsSync(p));
+  const timer = stepTimer('ffmpeg', 'extractFramesFromVideo', {
+    videoPath: input.videoPath,
+    outDir: input.outDir,
+    frameCount: input.frameCount,
+    width: input.width,
+    height: input.height,
+    duration: input.duration
+  });
+
+  try {
+    if (input.frameCount <= 0) {
+      timer.done({ extractedFrames: 0, reason: 'frameCount <= 0' });
+      return [];
+    }
+    fs.mkdirSync(input.outDir, { recursive: true });
+    const outPattern = path.join(input.outDir, 'frame_%03d.png');
+    const fps = input.frameCount / Math.max(0.001, input.duration);
+    await runFfmpeg([
+      '-y',
+      '-i',
+      input.videoPath,
+      '-vf',
+      `fps=${fps.toFixed(6)},scale=${input.width}:${input.height}:force_original_aspect_ratio=increase,crop=${input.width}:${input.height}`,
+      '-frames:v',
+      String(input.frameCount),
+      outPattern
+    ], {
+      operation: 'extractFramesFromVideo',
+      videoPath: input.videoPath,
+      outDir: input.outDir,
+      expectedFrames: input.frameCount
+    });
+
+    const frames = Array.from({ length: input.frameCount }, (_, index) =>
+      path.join(input.outDir, `frame_${String(index + 1).padStart(3, '0')}.png`)
+    ).filter(p => fs.existsSync(p));
+    timer.done({ extractedFrames: frames.length, expectedFrames: input.frameCount });
+    return frames;
+  } catch (error) {
+    timer.fail(error, { videoPath: input.videoPath, outDir: input.outDir });
+    throw error;
+  }
 }
 
-/** Normalize a Wan video output to browser-friendly mp4 when needed. */
 export async function transcodeVideoToMp4(input: TranscodeVideoInput): Promise<void> {
-  fs.mkdirSync(path.dirname(input.outPath), { recursive: true });
-  await runFfmpeg([
-    '-y',
-    '-i',
-    input.inputPath,
-    '-c:v',
-    'libx264',
-    '-pix_fmt',
-    'yuv420p',
-    '-movflags',
-    '+faststart',
-    input.outPath
-  ]);
+  const timer = stepTimer('ffmpeg', 'transcodeVideoToMp4', {
+    inputPath: input.inputPath,
+    outPath: input.outPath
+  });
+  try {
+    fs.mkdirSync(path.dirname(input.outPath), { recursive: true });
+    const args = [
+      '-y',
+      '-i',
+      input.inputPath,
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      ...(input.fps ? ['-r', String(input.fps)] : []),
+      '-movflags',
+      '+faststart',
+      input.outPath
+    ];
+    await runFfmpeg(args, { operation: 'transcodeVideoToMp4', inputPath: input.inputPath, outPath: input.outPath, fps: input.fps ?? null });
+    const stat = fs.existsSync(input.outPath) ? fs.statSync(input.outPath) : null;
+    timer.done({ outPath: input.outPath, bytes: stat?.size ?? null });
+  } catch (error) {
+    timer.fail(error, {
+      inputPath: input.inputPath,
+      outPath: input.outPath
+    });
+    throw error;
+  }
 }
 
-/** 检查 FFmpeg 是否可用 */
 export async function checkFfmpeg(): Promise<{ ok: boolean; version?: string }> {
-  return new Promise((resolve) => {
+  const timer = stepTimer('ffmpeg', 'checkFfmpeg', { bin: FFMPEG_BIN });
+  return new Promise(resolve => {
     const child = spawn(FFMPEG_BIN, ['-version'], {
       stdio: ['ignore', 'pipe', 'ignore'],
       shell: false
     });
     let out = '';
     child.stdout.on('data', (d: Buffer) => (out += d.toString('utf8')));
-    child.on('error', () => resolve({ ok: false }));
-    child.on('close', (code) => {
-      if (code !== 0) return resolve({ ok: false });
+    child.on('error', error => {
+      timer.fail(error);
+      resolve({ ok: false });
+    });
+    child.on('close', code => {
+      if (code !== 0) {
+        timer.done({ ok: false, code });
+        return resolve({ ok: false });
+      }
       const m = out.match(/ffmpeg version ([\w.\-+]+)/);
+      timer.done({ ok: true, version: m?.[1] });
       resolve({ ok: true, version: m?.[1] });
     });
   });

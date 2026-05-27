@@ -34,7 +34,7 @@ export function keyframeCacheKey(opts: {
     h: opts.height,
     st: opts.style ?? '',
     ri: opts.reference_image_hash ?? '',
-    m: opts.model ?? 'wan-direct'
+    m: opts.model ?? 'comfyui-gguf'
   });
   return sha256Hex(payload).slice(0, 32);
 }
@@ -45,7 +45,7 @@ export function videoCacheKey(task: VideoTaskRow, keyframes: KeyframeRow[], gene
     .sort((a, b) => a.frame_index - b.frame_index)
     .map(k => (k.image_path && fs.existsSync(k.image_path) ? hashFile(k.image_path) : k.cache_key));
   const payload = JSON.stringify({
-    v: 'ffmpeg-static-xfade-english-v4',
+    v: 'comfyui-gguf-video-v1',
     p: (generationPrompt ?? task.generation_prompt ?? task.prompt).trim(),
     display_p: task.prompt.trim(),
     s: task.style ?? '',
@@ -54,6 +54,15 @@ export function videoCacheKey(task: VideoTaskRow, keyframes: KeyframeRow[], gene
     f: task.fps,
     mt: task.motion_type,
     sd: task.seed,
+    backend: {
+      model: process.env.COMFYUI_WAN_MODEL ?? '',
+      clip: process.env.COMFYUI_WAN_CLIP ?? '',
+      vae: process.env.COMFYUI_WAN_VAE ?? '',
+      frames: process.env.WAN_VIDEO_FRAMES ?? '',
+      steps: process.env.WAN_STEPS ?? '',
+      cfg: process.env.WAN_GUIDANCE_SCALE ?? '',
+      outputFps: process.env.COMFYUI_OUTPUT_FPS ?? ''
+    },
     fh: frameHashes
   });
   return sha256Hex(payload).slice(0, 32);

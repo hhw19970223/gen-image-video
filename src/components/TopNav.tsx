@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 const links: { href: string; label: string; match?: (p: string) => boolean }[] = [
   { href: '/', label: '创作', match: p => p === '/' },
   { href: '/history', label: '工作台', match: p => p.startsWith('/history') || p.startsWith('/workspace') },
+  { href: '/codex', label: 'Codex', match: p => p.startsWith('/codex') },
   { href: '/history?tab=completed', label: '最近预览', match: p => p.startsWith('/preview') }
 ];
 
@@ -38,7 +39,7 @@ export default function TopNav() {
             <circle cx="11" cy="11" r="7" />
             <path d="m21 21-4.3-4.3" />
           </svg>
-          <span>搜索任务、关键帧、模板…</span>
+          <span>搜索任务、模板…</span>
           <kbd>⌘ K</kbd>
         </div>
         <span className="avatar" title="Local">U</span>

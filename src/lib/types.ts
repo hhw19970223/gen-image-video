@@ -105,6 +105,34 @@ export interface ChatLogRow {
   created_at: string;
 }
 
+export interface CodexSessionRow {
+  id: string;
+  title: string;
+  codex_thread_id: string | null;
+  status: 'active' | 'archived';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CodexMessageRow {
+  id: string;
+  session_id: string;
+  task_id: string | null;
+  role: 'user' | 'assistant' | 'system';
+  kind: 'plan' | 'translation' | 'chat' | 'error' | 'note';
+  content: string;
+  codex_thread_id: string | null;
+  created_at: string;
+}
+
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  path: string;
+}
+
 export interface CreateTaskInput {
   prompt: string;
   reference_image_path?: string;
@@ -136,6 +164,11 @@ export interface ConfirmedFramePlan {
     transitionLogic: string;
     continuityStrategy: string;
   };
+  agentSkills: Array<{
+    agent: string;
+    skill: string;
+    output: string;
+  }>;
   storyboard?: Array<{
     frameIndex: number;
     timeSec: number;
@@ -153,12 +186,7 @@ export interface ConfirmedFramePlan {
     roleInAnimation: string;
     visualChange: string;
   }>;
-  agentSkills: Array<{
-    agent: string;
-    skill: string;
-    output: string;
-  }>;
-  framePrompts: string[];
+  framePrompts?: string[];
   negativePrompt: string;
   notes: string;
   source?: 'codex' | 'fallback';

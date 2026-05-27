@@ -2,12 +2,20 @@
 //
 // 设计:
 //   - 把 codex CLI 视为可选 LLM 编排器
-//   - 输入: 用户原始 prompt + 视频参数(帧数/比例/动作/风格)
-//   - 输出: 一个 plan { overallPlan; agentSkills; framePrompts; negativePrompt; notes }
+//   - 输入: 用户原始 prompt + 视频参数(时长/比例/动作/风格)
+//   - 输出: 一个视频级 plan { overallPlan; smoothAnimation; agentSkills; negativePrompt; notes }
 //   - 如果 CODEX_BIN 可执行则真实调用,否则使用规则 fallback(确定性,可复现)
 
 import { spawn } from 'node:child_process';
-import type { CreateTaskInput } from '../types';
+import type { ChatAttachment, CreateTaskInput } from '../types';
+import { logInfo, logWarn, stepTimer } from '../logger';
+import {
+  appendCodexMessage,
+  getActiveCodexSession,
+  getCodexSession,
+  updateCodexSession
+} from '../repo';
+import type { CodexSessionRow } from '../types';
 
 export interface FramePlan {
   overallPlan: {
@@ -26,7 +34,7 @@ export interface FramePlan {
     transitionLogic: string;
     continuityStrategy: string;
   };
-  storyboard: Array<{
+  storyboard?: Array<{
     frameIndex: number;
     timeSec: number;
     coreFrame: string;
@@ -36,7 +44,7 @@ export interface FramePlan {
     continuityAnchor: string;
     comfyPrompt: string;
   }>;
-  frameStills: Array<{
+  frameStills?: Array<{
     frameIndex: number;
     timeSec: number;
     stillDescription: string;
@@ -48,7 +56,7 @@ export interface FramePlan {
     skill: string;
     output: string;
   }>;
-  framePrompts: string[];
+  framePrompts?: string[];
   negativePrompt: string;
   notes: string;
   source: 'codex' | 'fallback';
@@ -65,35 +73,35 @@ export interface GenerationPromptTranslation {
   model?: string;
 }
 
-const SYSTEM_PROMPT = `你是一个 AI 视频创作多 Agent 编排组,不要写僵硬的说明文,要输出可以直接给图像/视频模型使用的导演级提示词。
+export interface CodexChatResult {
+  text: string;
+  source: 'codex' | 'fallback';
+  codexThreadId?: string;
+  sessionId: string;
+  model?: string;
+}
+
+const SYSTEM_PROMPT = `你是一个 AI 视频创作多 Agent 编排组,不要写僵硬的说明文,要输出可以直接给视频模型使用的导演级视频规划。
 
 团队角色:
 - Creative Director Agent: 提炼概念、情绪、卖点和视觉隐喻。
-- Storyboard Agent: 把画面拆成有节奏的镜头起承转合。
-- Image Prompt Agent: 写出主体、构图、光影、材质、色彩、景深、镜头焦段。
+- Video Director Agent: 把画面组织成一段连续、顺滑、可执行的视频。
+- Video Prompt Agent: 写出主体、构图、光影、材质、色彩、景深、镜头焦段和整体运动。
 - Animation Agent: 写出镜头运动、主体微动作、转场节奏,避免大幅跳变。
 - Copy Polish Agent: 把平铺直叙改成自然、有画面感、适合短视频/广告片的表达。
-- Continuity Reviewer Agent: 确保所有关键帧保持同一个主体、同一身份/产品外观、同一材质、同一服装/包装、同一场景和光线连续性。
+- Continuity Reviewer Agent: 确保整段视频保持同一个主体、同一身份/产品外观、同一材质、同一服装/包装、同一场景和光线连续性。
 
 任务:
 - 第 0 步必须先润色用户原始描述: 把 user_prompt 扩写成一个完整动画创意,明确主体是谁、主体数量、场景在哪里、开始状态、动作推进、镜头运动、情绪节奏和结尾记忆点。不能只复述 user_prompt。
-- 第一层必须是给用户二次确认的中文导演规划,不是 Wan prompt。先写 animationDescription: 一段完整、顺滑、可执行的成片动画描述,明确在 duration 秒内画面如何开始、如何运动、如何过渡、如何收束。它要像导演给分镜师的说明,不能只是关键词堆叠。
-- 第二层必须是给用户二次确认的中文逐帧定格描述 frameStills。按每秒 1 帧拆成 N 个定格画面,每一帧都写“这一秒暂停时画面应该是什么样”,而不是写模型提示词或写给模型看的要求。每个 frameStill 必须包含 stillDescription、roleInAnimation、visualChange。
-- 第三层才是内部 Wan 生成用 storyboard/comfyPrompt。它要从定格描述派生,但不要把它作为用户确认的主要内容。
+- 第一层必须是给用户二次确认的中文导演规划,不是 ComfyUI/Wan prompt。先写 animationDescription: 一段完整、顺滑、可执行的成片动画描述,明确在 duration 秒内画面如何开始、如何运动、如何过渡、如何收束。它要像导演给分镜师的说明,不能只是关键词堆叠。
 - 必须先做整支视频的总规划,说明这个视频最终应该是什么样: 核心概念、视觉风格、镜头语言、节奏、连续性约束、参考图使用方式。
-- 再把总规划拆成 N 张关键帧的时间轴分镜,每一秒一帧,每帧都必须是上一帧的自然推进,不能像独立海报。
-- 每条 storyboard.coreFrame 的“核心画面”必须足够细: 主体外观、数量、姿态/朝向、相对画面位置、前景/中景/背景关系、材质纹理、颜色、光源方向、阴影、高光、景深、镜头焦段、画面边缘可见元素都要写清楚。
-- 每一帧都要说明 previousToCurrentChange: “这一帧和上一帧相比具体变化了什么”,变化只能发生在镜头距离、角度、构图裁切、局部姿态、光影强弱或转场节奏,不能改变主体身份。
-- 每一帧都要写 continuityAnchor,明确哪些主体身份、材质、服装/包装、场景、光源方向、色彩关系必须延续到上一帧和下一帧。
-- 每一帧都要写 comfyPrompt,这是最终给 Wan 的提示词,必须重复主体身份、核心画面细节、相对上一帧变化、必须不变的连续性锚点、镜头位置/裁切/焦段/光线/背景。不要用“同上”“保持一致”这种省略说法。
-- 每张关键帧体现镜头的渐进运动(zoom_in/zoom_out/pan/fade/crossfade 等),但不要改变主体身份。
+- 不要输出逐帧拆解、每秒定格、keyframe、framePrompts、storyboard 或 comfyPrompt。当前是 ComfyUI GGUF Wan 视频模式,只需要整段视频规划。
+- smoothAnimation 必须写清楚: 开场画面、主体动作、镜头运动、节奏变化、转场/连续逻辑、结尾收束,让 ComfyUI GGUF Wan 能直接理解为一条连续视频。
 - 如果 has_reference_image 为 true,提示词要综合所有参考图；第一张是主锚定图,其他参考图用于补充主体细节、材质、配色、包装/服装、场景和光线信息。
 - 有多张参考图时,不要把它们画成多个并列主体,除非用户明确要求；默认融合为同一主体/同一产品的连续镜头约束。
 - 文案要具体、顺滑、有导演感,避免“第几帧,远景/中景”这种机械句式。
-- 禁止输出占位指令或模板检查项,例如“写清楚主体比例”“主体完整入画”“主体轮廓更清晰”“进入近景”“结束定格,描述最终构图”。这些是内部要求,不能出现在 frameStills、storyboard 或 framePrompts 里。
-- 输出 JSON: {"overallPlan": {"concept": "...", "visualStyle": "...", "cameraLanguage": "...", "continuityRules": "...", "referenceUsage": "..."}, "animationDescription": "...", "smoothAnimation": {"durationSeconds": 15, "summary": "...", "motionArc": "...", "timing": "...", "transitionLogic": "...", "continuityStrategy": "..."}, "frameStills": [{"frameIndex": 0, "timeSec": 0, "stillDescription": "...", "roleInAnimation": "...", "visualChange": "..."}], "storyboard": [{"frameIndex": 0, "timeSec": 0, "coreFrame": "...", "previousToCurrentChange": "...", "cameraState": "...", "subjectState": "...", "continuityAnchor": "...", "comfyPrompt": "..."}], "agentSkills": [{"agent": "Creative Director Agent", "skill": "...", "output": "..."}], "framePrompts": ["...", "..."], "negativePrompt": "...", "notes": "..."}
-- agentSkills 必须至少包含 Creative Director Agent、Storyboard Agent、Image Prompt Agent、Animation Agent、Continuity Reviewer Agent；如果是商业/产品内容,还要包含 Copy Polish Agent。
-- frameStills 数组长度必须等于 N,storyboard 数组长度必须等于 N,framePrompts 数组长度也必须等于 N,且 framePrompts 必须由 storyboard[].comfyPrompt 派生。
+- 输出 JSON: {"overallPlan": {"concept": "...", "visualStyle": "...", "cameraLanguage": "...", "continuityRules": "...", "referenceUsage": "..."}, "animationDescription": "...", "smoothAnimation": {"durationSeconds": 15, "summary": "...", "motionArc": "...", "timing": "...", "transitionLogic": "...", "continuityStrategy": "..."}, "agentSkills": [{"agent": "Creative Director Agent", "skill": "...", "output": "..."}], "negativePrompt": "...", "notes": "..."}
+- agentSkills 必须至少包含 Creative Director Agent、Video Director Agent、Video Prompt Agent、Animation Agent、Continuity Reviewer Agent；如果是商业/产品内容,还要包含 Copy Polish Agent。
 - negativePrompt 描述应避免的画面缺陷。
 - notes 用一两句话给出整体节奏建议,说明用了哪些 Agent 角色。`;
 
@@ -119,19 +127,31 @@ export async function planFrames(
   motion: string
 ): Promise<FramePlan> {
   const codexBin = process.env.CODEX_BIN?.trim();
+  const timer = stepTimer('codex', 'planFrames', {
+    prompt: input.prompt,
+    frameCount,
+    motion,
+    style: input.style,
+    duration: input.duration,
+    codexConfigured: Boolean(codexBin)
+  });
   if (codexBin) {
     try {
-      return await runCodex(codexBin, input, frameCount, motion);
+      const plan = toVideoOnlyPlan(await runCodex(codexBin, input, frameCount, motion));
+      timer.done({ source: plan.source, model: plan.model });
+      return plan;
     } catch (e) {
-      console.warn('[codex] failed, falling back:', (e as Error).message);
+      logWarn('codex', 'planFrames.codexFallback', { reason: (e as Error).message });
     }
   }
-  return fallbackPlan(input, frameCount, motion);
+  const plan = toVideoOnlyPlan(fallbackPlan(input, frameCount, motion));
+  timer.done({ source: plan.source });
+  return plan;
 }
 
 export async function translatePlanForGeneration(input: {
   userPrompt: string;
-  framePrompts: string[];
+  framePrompts?: string[];
   negativePrompt?: string;
   overallPlan?: unknown;
   animationDescription?: unknown;
@@ -144,14 +164,25 @@ export async function translatePlanForGeneration(input: {
   style?: string | null;
 }): Promise<GenerationPromptTranslation> {
   const codexBin = process.env.CODEX_BIN?.trim();
+  const timer = stepTimer('codex', 'translatePlanForGeneration', {
+    userPrompt: input.userPrompt,
+    framePrompts: input.framePrompts?.length ?? 0,
+    duration: input.duration,
+    motion: input.motion,
+    codexConfigured: Boolean(codexBin)
+  });
   if (codexBin) {
     try {
-      return await runCodexTranslation(codexBin, input);
+      const translated = await runCodexTranslation(codexBin, input);
+      timer.done({ source: translated.source, model: translated.model });
+      return translated;
     } catch (e) {
-      console.warn('[codex translate] failed, falling back:', (e as Error).message);
+      logWarn('codex', 'translatePlanForGeneration.codexFallback', { reason: (e as Error).message });
     }
   }
-  return fallbackGenerationTranslation(input);
+  const translated = fallbackGenerationTranslation(input);
+  timer.done({ source: translated.source });
+  return translated;
 }
 
 export async function translateTextForGeneration(input: {
@@ -183,15 +214,101 @@ export async function translateTextForGeneration(input: {
   };
 }
 
+export async function sendCodexChat(input: {
+  message: string;
+  sessionId?: string;
+  attachments?: ChatAttachment[];
+}): Promise<CodexChatResult> {
+  const codexBin = process.env.CODEX_BIN?.trim();
+  const session = resolveCodexSession(input.sessionId);
+  const attachments = input.attachments ?? [];
+  const codexPrompt = buildCodexChatPrompt(input.message, attachments);
+
+  const userContent = JSON.stringify({
+    text: input.message,
+    attachments: attachments.map(a => ({ id: a.id, name: a.name, type: a.type, size: a.size, path: a.path }))
+  });
+  appendCodexMessage({
+    session_id: session.id,
+    task_id: null,
+    role: 'user',
+    kind: 'chat',
+    content: userContent,
+    codex_thread_id: session.codex_thread_id
+  });
+
+  if (!codexBin) {
+    const text = 'CODEX_BIN 未配置,无法继续 Codex 会话。';
+    appendCodexMessage({
+      session_id: session.id,
+      task_id: null,
+      role: 'system',
+      kind: 'error',
+      content: text,
+      codex_thread_id: session.codex_thread_id
+    });
+    return { text, source: 'fallback', sessionId: session.id, codexThreadId: session.codex_thread_id ?? undefined };
+  }
+
+  try {
+    const result = await runCodexText(codexBin, codexPrompt, session, 'chat', readPositiveInt(process.env.CODEX_CHAT_TIMEOUT_MS, 300_000));
+    if (result.threadId) updateCodexSession(session.id, { codex_thread_id: result.threadId });
+    appendCodexMessage({
+      session_id: session.id,
+      task_id: null,
+      role: 'assistant',
+      kind: 'chat',
+      content: result.text,
+      codex_thread_id: result.threadId ?? session.codex_thread_id
+    });
+    return {
+      text: result.text,
+      source: 'codex',
+      sessionId: session.id,
+      codexThreadId: result.threadId ?? session.codex_thread_id ?? undefined,
+      model: result.model
+    };
+  } catch (error) {
+    const text = `Codex 调用失败: ${(error as Error).message}`;
+    appendCodexMessage({
+      session_id: session.id,
+      task_id: null,
+      role: 'system',
+      kind: 'error',
+      content: text,
+      codex_thread_id: session.codex_thread_id
+    });
+    return { text, source: 'fallback', sessionId: session.id, codexThreadId: session.codex_thread_id ?? undefined };
+  }
+}
+
+function buildCodexChatPrompt(message: string, attachments: ChatAttachment[]): string {
+  if (attachments.length === 0) return message;
+  const fileList = attachments
+    .map((attachment, index) => `${index + 1}. ${attachment.name} (${attachment.type || 'unknown'}, ${attachment.size} bytes): ${attachment.path}`)
+    .join('\n');
+  return [
+    message || '请查看我上传的文件。',
+    '',
+    '用户随这条消息上传了文件。请直接使用 Codex CLI 的本地文件读取能力查看这些路径并结合文件内容回答:',
+    fileList,
+    '',
+    '不要把本地绝对路径暴露给最终用户,除非用户明确询问。'
+  ].join('\n');
+}
+
 async function runCodex(
   bin: string,
   input: CreateTaskInput,
   frameCount: number,
   motion: string
 ): Promise<FramePlan> {
+  const startedAt = Date.now();
   return new Promise((resolve, reject) => {
-    const model = process.env.CODEX_MODEL || 'gpt-5-mini';
-    const args = ['exec', '-C', process.cwd(), '--skip-git-repo-check', '--model', model, '--json'];
+    const session = getActiveCodexSession();
+    const model = process.env.CODEX_MODEL?.trim() ?? '';
+    const args = codexExecArgs(model, session.codex_thread_id ?? undefined);
+    logInfo('codex', 'runCodex.spawn', { bin, args, model, prompt: input.prompt, frameCount, motion, sessionId: session.id, codexThreadId: session.codex_thread_id });
     const child = spawn(bin, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: process.platform === 'win32'
@@ -200,46 +317,56 @@ async function runCodex(
     let err = '';
     child.stdout.on('data', (d: Buffer) => (out += d.toString('utf8')));
     child.stderr.on('data', (d: Buffer) => (err += d.toString('utf8')));
+    const timeoutMs = readPositiveInt(process.env.CODEX_PLAN_TIMEOUT_MS, 300_000);
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error('codex CLI timed out after 60s'));
-    }, 60_000);
+      reject(new Error(`codex CLI timed out after ${Math.round(timeoutMs / 1000)}s; stderr=${tail(err)}; stdout=${tail(out)}`));
+    }, timeoutMs);
     child.on('error', (e: Error) => {
       clearTimeout(timer);
       reject(e);
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      if (code !== 0) return reject(new Error(`codex exited ${code}: ${err}`));
+      if (code !== 0) return reject(new Error(`codex exited ${code}: ${tail(err)}`));
       try {
         // 提取 JSON: codex CLI 通常会输出一行行 JSON event,最后一段 text 是 assistant 内容
         const result = extractCodexResult(out);
+        if (result.threadId) updateCodexSession(session.id, { codex_thread_id: result.threadId });
+        appendCodexMessage({
+          session_id: session.id,
+          task_id: null,
+          role: 'user',
+          kind: 'plan',
+          content: JSON.stringify({ prompt: input.prompt, frameCount, motion, style: input.style, duration: input.duration }),
+          codex_thread_id: result.threadId ?? session.codex_thread_id
+        });
+        appendCodexMessage({
+          session_id: session.id,
+          task_id: null,
+          role: 'assistant',
+          kind: 'plan',
+          content: result.text,
+          codex_thread_id: result.threadId ?? session.codex_thread_id
+        });
         const json = extractJson(result.text);
         const parsed = JSON.parse(json);
-        const fallbackPrompts = Array.isArray(parsed.framePrompts) ? parsed.framePrompts.map(String) : [];
-        const storyboard = normalizeStoryboard(parsed.storyboard, fallbackPrompts, input, frameCount, motion);
-        const prompts = storyboard.map(item => item.comfyPrompt);
-        if (prompts.length !== frameCount) {
-          return reject(new Error(`codex returned ${prompts.length} frames, expected ${frameCount}`));
-        }
         const plan: FramePlan = {
           overallPlan: normalizeOverallPlan(parsed.overallPlan, input, frameCount, motion),
           animationDescription: normalizeAnimationDescription(parsed.animationDescription, input, frameCount, motion),
           smoothAnimation: normalizeSmoothAnimation(parsed.smoothAnimation, input, frameCount, motion),
-          storyboard,
-          frameStills: normalizeFrameStills(parsed.frameStills, storyboard, input, frameCount, motion),
           agentSkills: normalizeAgentSkills(parsed.agentSkills, input),
-          framePrompts: prompts,
           negativePrompt: String(parsed.negativePrompt ?? ''),
           notes: String(parsed.notes ?? ''),
           source: 'codex',
           codexThreadId: result.threadId,
-          model
+          model: model || undefined
         };
-        const weakReason = weakCodexPlanReason(plan, input, frameCount);
-        if (weakReason) {
-          return reject(new Error(`codex plan rejected: ${weakReason}`));
-        }
+        logInfo('codex', 'runCodex.parsed', {
+          elapsedMs: Date.now() - startedAt,
+          threadId: result.threadId,
+          outputBytes: out.length
+        });
         resolve(plan);
       } catch (e) {
         reject(e as Error);
@@ -255,9 +382,20 @@ async function runCodexTranslation(
   bin: string,
   input: Parameters<typeof translatePlanForGeneration>[0]
 ): Promise<GenerationPromptTranslation> {
+  const startedAt = Date.now();
   return new Promise((resolve, reject) => {
-    const model = process.env.CODEX_MODEL || 'gpt-5-mini';
-    const args = ['exec', '-C', process.cwd(), '--skip-git-repo-check', '--model', model, '--json'];
+    const session = getActiveCodexSession();
+    const model = process.env.CODEX_MODEL?.trim() ?? '';
+    const args = codexExecArgs(model, session.codex_thread_id ?? undefined);
+    logInfo('codex', 'runCodexTranslation.spawn', {
+      bin,
+      args,
+      model,
+      userPrompt: input.userPrompt,
+      framePrompts: input.framePrompts?.length ?? 0,
+      sessionId: session.id,
+      codexThreadId: session.codex_thread_id
+    });
     const child = spawn(bin, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: process.platform === 'win32'
@@ -266,25 +404,40 @@ async function runCodexTranslation(
     let err = '';
     child.stdout.on('data', (d: Buffer) => (out += d.toString('utf8')));
     child.stderr.on('data', (d: Buffer) => (err += d.toString('utf8')));
+    const timeoutMs = readPositiveInt(process.env.CODEX_TRANSLATE_TIMEOUT_MS, 300_000);
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error('codex translation timed out after 90s'));
-    }, 90_000);
+      reject(new Error(`codex translation timed out after ${Math.round(timeoutMs / 1000)}s; stderr=${tail(err)}; stdout=${tail(out)}`));
+    }, timeoutMs);
     child.on('error', (e: Error) => {
       clearTimeout(timer);
       reject(e);
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      if (code !== 0) return reject(new Error(`codex translation exited ${code}: ${err}`));
+      if (code !== 0) return reject(new Error(`codex translation exited ${code}: ${tail(err)}`));
       try {
         const result = extractCodexResult(out);
+        if (result.threadId) updateCodexSession(session.id, { codex_thread_id: result.threadId });
+        appendCodexMessage({
+          session_id: session.id,
+          task_id: null,
+          role: 'user',
+          kind: 'translation',
+          content: JSON.stringify(input),
+          codex_thread_id: result.threadId ?? session.codex_thread_id
+        });
+        appendCodexMessage({
+          session_id: session.id,
+          task_id: null,
+          role: 'assistant',
+          kind: 'translation',
+          content: result.text,
+          codex_thread_id: result.threadId ?? session.codex_thread_id
+        });
         const parsed = JSON.parse(extractJson(result.text)) as Record<string, unknown>;
         const framePrompts = Array.isArray(parsed.framePrompts) ? parsed.framePrompts.map(String) : [];
-        if (framePrompts.length !== input.framePrompts.length) {
-          return reject(new Error(`codex translated ${framePrompts.length} frames, expected ${input.framePrompts.length}`));
-        }
-        resolve({
+        const translated: GenerationPromptTranslation = {
           videoPrompt: String(parsed.videoPrompt ?? englishVideoFallback(input)),
           framePrompts,
           negativePrompt: sanitizeNegativePrompt(
@@ -293,8 +446,14 @@ async function runCodexTranslation(
           ),
           source: 'codex',
           codexThreadId: result.threadId,
-          model
+          model: model || undefined
+        };
+        logInfo('codex', 'runCodexTranslation.parsed', {
+          elapsedMs: Date.now() - startedAt,
+          threadId: result.threadId,
+          outputBytes: out.length
         });
+        resolve(translated);
       } catch (e) {
         reject(e as Error);
       }
@@ -305,21 +464,30 @@ async function runCodexTranslation(
   });
 }
 
-const TRANSLATION_PROMPT = `You are the internal prompt translator for a direct Wan video pipeline.
-Translate the provided Chinese planning text into fluent, concrete English image-generation prompts.
-Do not expose explanations. Preserve all visual details, continuity constraints, frame-to-frame changes, camera state, lighting, materials, subject identity, and reference-image instructions.
-If the user requests two different subjects, especially animals such as a cat and a mouse, every frame prompt must explicitly state the exact requested subject count and species, for example: "exactly one cat and exactly one small mouse in the same frame, two different species, the mouse is much smaller than the cat, do not turn the mouse into a second cat".
+const TRANSLATION_PROMPT = `You are the internal prompt translator for a ComfyUI GGUF Wan video pipeline.
+Translate the provided Chinese video planning text into one fluent, concrete English video-generation prompt.
+Do not expose explanations. Preserve all visual details, continuity constraints, camera motion, timing, lighting, materials, subject identity, and reference-image instructions.
+If the user requests two different subjects, especially animals such as a cat and a mouse, the video prompt must explicitly state the exact requested subject count and species, for example: "exactly one cat and exactly one small mouse in the same continuous video, two different species, the mouse is much smaller than the cat, do not turn the mouse into a second cat".
 The user-facing plan stays in the original language; your output is only for internal generation.
 Return strict JSON only:
-{"videoPrompt":"English video-level generation summary","framePrompts":["English Wan prompt 1"],"negativePrompt":"English negative prompt"}
+{"videoPrompt":"English video-level generation prompt","negativePrompt":"English negative prompt"}
 Rules:
-- framePrompts length must exactly match the input framePrompts length.
-- Each frame prompt must be directly usable by Wan/video model.
-- Repeat subject identity and continuity anchors in every frame.
-- Do not use vague translation notes like "same as previous"; write the actual visual details again.
+- Do not output framePrompts, storyboard, keyframes, or per-second stills.
+- The videoPrompt must be directly usable by Wan/video model.
+- Repeat subject identity, scene, lighting direction, camera motion, and continuity anchors inside the single video prompt.
 - Keep product names, brand names, and proper nouns unchanged when present.
 - negativePrompt must be English and should include common image defects, text/watermark/logo errors, subject drift, background jumps, and unwanted extra subjects.
 - Never put requested subjects into the negative prompt. If the requested subject includes animals, do not write "animals appearing" as a negative. If the requested subject is cat and mouse, useful negatives include: second cat, second mouse, missing mouse, missing cat, mouse transformed into cat.`;
+
+function toVideoOnlyPlan(plan: FramePlan): FramePlan {
+  return {
+    ...plan,
+    storyboard: undefined,
+    frameStills: undefined,
+    framePrompts: undefined,
+    notes: plan.notes.replace(/(?:\s*·\s*)?\d+\s*帧/g, '').replace(/关键帧/g, '视频')
+  };
+}
 
 function normalizeOverallPlan(
   value: unknown,
@@ -347,7 +515,11 @@ function normalizeAnimationDescription(
   motion: string
 ): string {
   const text = typeof value === 'string' ? value.trim() : '';
-  return text || fallbackAnimationDescription(input, frameCount, motion);
+  if (!text) return fallbackAnimationDescription(input, frameCount, motion);
+  if (/系统先|润色成完整成片过程|模板化说明|不是模板|而不是|应该如何|需要明确|必须像/.test(text)) {
+    return fallbackAnimationDescription(input, frameCount, motion);
+  }
+  return text;
 }
 
 function normalizeSmoothAnimation(
@@ -361,9 +533,9 @@ function normalizeSmoothAnimation(
     return {
       durationSeconds: Number.isFinite(Number(raw.durationSeconds)) ? Number(raw.durationSeconds) : input.duration,
       summary: String(raw.summary ?? `围绕“${input.prompt}”生成一段连续顺滑的 ${input.duration}s 动画。`),
-      motionArc: String(raw.motionArc ?? `${motion} across ${frameCount} one-second keyframes.`),
-      timing: String(raw.timing ?? `每秒 1 张关键帧,共 ${frameCount} 张。`),
-      transitionLogic: String(raw.transitionLogic ?? '每帧只做小幅镜头推进、裁切、光影或姿态变化。'),
+      motionArc: String(raw.motionArc ?? `${motion} camera motion across the full video.`),
+      timing: String(raw.timing ?? `整段 ${input.duration}s 视频保持连续节奏。`),
+      transitionLogic: String(raw.transitionLogic ?? '只做小幅镜头推进、裁切、光影或姿态变化。'),
       continuityStrategy: String(raw.continuityStrategy ?? '重复主体身份、材质、场景、光线和构图锚点,避免漂移。')
     };
   }
@@ -383,9 +555,9 @@ function normalizeFrameStills(
       return {
         frameIndex: Number.isFinite(Number(raw.frameIndex)) ? Number(raw.frameIndex) : index,
         timeSec: Number.isFinite(Number(raw.timeSec)) ? Number(raw.timeSec) : index,
-        stillDescription: String(raw.stillDescription ?? storyboard[index]?.coreFrame ?? input.prompt),
+        stillDescription: String(raw.stillDescription ?? storyboard?.[index]?.coreFrame ?? input.prompt),
         roleInAnimation: String(raw.roleInAnimation ?? (index === 0 ? '建立动画的主体、空间和光线基准。' : '承接上一秒画面,推动动画继续变化。')),
-        visualChange: String(raw.visualChange ?? storyboard[index]?.previousToCurrentChange ?? `${motion} 的第 ${index + 1}/${frameCount} 个定格变化。`)
+        visualChange: String(raw.visualChange ?? storyboard?.[index]?.previousToCurrentChange ?? `${motion} 的第 ${index + 1}/${frameCount} 个定格变化。`)
       };
     });
   }
@@ -418,7 +590,7 @@ function normalizeStoryboard(
 
   const plan = fallbackPlan(input, frameCount, motion);
   return fallbackPrompts.length === frameCount
-    ? plan.storyboard.map((item, index) => ({ ...item, comfyPrompt: fallbackPrompts[index] }))
+    ? (plan.storyboard ?? []).map((item, index) => ({ ...item, comfyPrompt: fallbackPrompts[index] }))
     : plan.storyboard;
 }
 
@@ -436,9 +608,85 @@ function normalizeAgentSkills(value: unknown, input: CreateTaskInput): FramePlan
   return fallbackAgentSkills(input);
 }
 
+function resolveCodexSession(sessionId?: string): CodexSessionRow {
+  if (sessionId) {
+    const found = getCodexSession(sessionId);
+    if (found) return found;
+  }
+  return getActiveCodexSession();
+}
+
+function codexExecArgs(model: string, codexThreadId?: string): string[] {
+  if (codexThreadId) {
+    const args = ['exec', 'resume', '--json', '--skip-git-repo-check'];
+    if (model.trim()) args.push('--model', model.trim());
+    args.push(codexThreadId, '-');
+    return args;
+  }
+
+  const args = ['exec', '-C', process.cwd(), '--skip-git-repo-check', '--json'];
+  if (model.trim()) {
+    args.push('--model', model.trim());
+  }
+  return args;
+}
+
+function runCodexText(
+  bin: string,
+  prompt: string,
+  session: CodexSessionRow,
+  event: string,
+  timeoutMs: number
+): Promise<{ text: string; threadId?: string; model?: string }> {
+  const startedAt = Date.now();
+  return new Promise((resolve, reject) => {
+    const model = process.env.CODEX_MODEL?.trim() ?? '';
+    const args = codexExecArgs(model, session.codex_thread_id ?? undefined);
+    logInfo('codex', `${event}.spawn`, { bin, args, model, sessionId: session.id, codexThreadId: session.codex_thread_id });
+    const child = spawn(bin, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: process.platform === 'win32'
+    });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (d: Buffer) => (out += d.toString('utf8')));
+    child.stderr.on('data', (d: Buffer) => (err += d.toString('utf8')));
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`codex ${event} timed out after ${Math.round(timeoutMs / 1000)}s; stderr=${tail(err)}; stdout=${tail(out)}`));
+    }, timeoutMs);
+    child.on('error', (e: Error) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on('close', code => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error(`codex ${event} exited ${code}: ${tail(err)}`));
+      const result = extractCodexResult(out);
+      logInfo('codex', `${event}.parsed`, {
+        elapsedMs: Date.now() - startedAt,
+        threadId: result.threadId,
+        outputBytes: out.length
+      });
+      resolve({ text: result.text, threadId: result.threadId, model: model || undefined });
+    });
+    child.stdin.write(prompt);
+    child.stdin.end();
+  });
+}
+
+function tail(value: string, max = 2000): string {
+  return value.length > max ? value.slice(-max) : value;
+}
+
+function readPositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
 function weakCodexPlanReason(plan: FramePlan, input: CreateTaskInput, frameCount: number): string | null {
-  const stills = plan.frameStills.map(item => item.stillDescription);
-  const storyboardTexts = plan.storyboard.map(item => [
+  const stills = (plan.frameStills ?? []).map(item => item.stillDescription);
+  const storyboardTexts = (plan.storyboard ?? []).map(item => [
     item.coreFrame,
     item.previousToCurrentChange,
     item.subjectState,
@@ -457,7 +705,7 @@ function weakCodexPlanReason(plan: FramePlan, input: CreateTaskInput, frameCount
   }
 
   const templatePhraseCount = frameTexts.filter(text =>
-    /原始用户提示|写清楚主体|主体完整入画|主体轮廓更清晰|只推进镜头运动和构图裁切/.test(text)
+    /原始用户提示|写清楚主体|主体完整入画|主体轮廓更清晰|只推进镜头运动和构图裁切|系统先|润色成完整成片过程|模板化说明|应该是什么样/.test(text)
   ).length;
   if (templatePhraseCount > 0) {
     return 'template phrases dominate the storyboard';
@@ -972,17 +1220,17 @@ function isCatMouseFightPrompt(prompt: string): boolean {
 function isGiantHeroKaijuFightPrompt(prompt: string): boolean {
   const hasHero = /奥特曼|巨型英雄|银红|外星英雄|ultraman|giant\s+hero|silver-red/i.test(prompt);
   const hasKaiju = /哥斯拉|怪兽|背鳍|原子吐息|godzilla|kaiju|dorsal|atomic/i.test(prompt);
-  const hasConflict = /大战|打架|搏斗|争斗|冲突|战斗|对战|对打|追逐|fight|fighting|battle|chase|versus|vs\.?/i.test(prompt);
+  const hasConflict = /大战|打架|打|搏斗|争斗|冲突|战斗|对战|对打|攻击|对抗|追逐|fight|fighting|battle|chase|versus|vs\.?/i.test(prompt);
   return hasHero && hasKaiju && hasConflict;
 }
 
 function isConflictPrompt(prompt: string): boolean {
-  return /大战|打架|搏斗|争斗|冲突|战斗|对战|追逐|fight|fighting|battle|versus|vs|chase/i.test(prompt);
+  return /大战|打架|打|搏斗|争斗|冲突|战斗|对战|攻击|对抗|追逐|fight|fighting|battle|versus|vs|chase/i.test(prompt);
 }
 
 function parsePromptSubjects(prompt: string): { a: string; b: string } {
   const normalized = prompt.trim();
-  const parts = normalized.split(/大战|打架|搏斗|争斗|冲突|战斗|对战|追逐|vs\.?|versus|fight(?:ing)?|battle|chase/i)
+  const parts = normalized.split(/大战|打架|打|搏斗|争斗|冲突|战斗|对战|攻击|对抗|追逐|vs\.?|versus|fight(?:ing)?|battle|chase/i)
     .map(part => part.trim())
     .filter(Boolean);
   return {
@@ -1088,7 +1336,7 @@ function fallbackPlan(input: CreateTaskInput, frameCount: number, motion: string
 function fallbackGenerationTranslation(input: Parameters<typeof translatePlanForGeneration>[0]): GenerationPromptTranslation {
   return {
     videoPrompt: englishVideoFallback(input),
-    framePrompts: input.framePrompts.map((prompt, index) => englishFrameFallback(prompt, input, index)),
+    framePrompts: input.framePrompts?.map((prompt, index) => englishFrameFallback(prompt, input, index)) ?? [],
     negativePrompt: englishNegativeFallback(input.negativePrompt, input),
     source: 'fallback'
   };
@@ -1099,8 +1347,10 @@ function englishVideoFallback(input: Parameters<typeof translatePlanForGeneratio
     `A smooth ${input.duration}-second short video animation generated from the user's concept.`,
     `Original concept: ${stripCjkIfPossible(input.userPrompt) || input.userPrompt}.`,
     `Motion: ${input.motion}; style: ${input.style ?? 'realistic visual style'}; ${input.fps} fps.`,
+    input.animationDescription ? `Director description: ${stripCjkIfPossible(String(input.animationDescription)) || String(input.animationDescription)}.` : '',
+    input.smoothAnimation ? `Motion plan: ${stripCjkIfPossible(JSON.stringify(input.smoothAnimation)) || JSON.stringify(input.smoothAnimation)}.` : '',
     'Keep the same subject identity, materials, color palette, lighting direction, scene layout, and camera continuity throughout the whole video.',
-    'One keyframe per second, each frame should connect naturally to the previous and next frame.'
+    'Generate one continuous coherent video clip, not separate still images or per-frame stills.'
   ].join(' ');
 }
 
@@ -1114,7 +1364,7 @@ function englishFrameFallback(
   const style = styleEnglish(input.style);
   return [
     subjectHints || 'clear main subject, visually consistent subject identity',
-    `frame ${index + 1} of ${input.framePrompts.length}, time ${index}s`,
+    `legacy frame ${index + 1} of ${input.framePrompts?.length ?? 1}, time ${index}s`,
     `original visual description to preserve: ${prompt}`,
     `continuous ${motion} camera movement, only small changes from the previous frame`,
     style,
@@ -1140,7 +1390,7 @@ function sanitizeNegativePrompt(
     JSON.stringify(input.overallPlan ?? ''),
     JSON.stringify(input.smoothAnimation ?? ''),
     JSON.stringify(input.storyboard ?? ''),
-    input.framePrompts.join(' ')
+    input.framePrompts?.join(' ') ?? ''
   ].join(' ');
   const hasCat = /猫|\bcat\b|\bcats\b|\btabby\b|\bfeline\b/i.test(context);
   const hasMouse = /鼠|老鼠|田鼠|\bmouse\b|\bmice\b|\brat\b|\brodent\b/i.test(context);
@@ -1207,8 +1457,8 @@ function fallbackOverallPlan(input: CreateTaskInput, frameCount: number, motion:
     return {
       concept: `把“${input.prompt}”明确拍成一支 ${input.duration}s 的写实连续动物动作短片: 一只橘色虎斑家猫和一只灰褐色小老鼠在同一间客厅木地板上发生非血腥、偏动画喜剧感的追逐扭打。观众始终能看清猫比老鼠大很多,两者一直在同一画面内互动。`,
       visualStyle: `${input.style ?? 'realistic'} 风格,真实动物摄影质感,猫毛、老鼠绒毛、木地板反光和窗光阴影清楚,画面不出现人物、不出现文字、不切换场景。`,
-      cameraLanguage: `${motion} 镜头语言,${frameCount} 张每秒定格从全景逐步推到近景,只改变镜头距离、裁切和猫鼠局部姿态,不换主体、不换背景、不把老鼠画成第二只猫。`,
-      continuityRules: '每一帧都固定为一只橘色虎斑猫、一只灰褐色小老鼠、同一块浅棕木地板、同一只翻倒的蓝色线团、同一束右上方暖窗光; 猫的白胸口和铜色项圈牌、老鼠的粉色尾巴必须持续可见。',
+      cameraLanguage: `${motion} 镜头语言,从客厅全景自然推到猫鼠互动近景,只改变镜头距离、裁切和猫鼠局部姿态,不换主体、不换背景、不把老鼠画成第二只猫。`,
+      continuityRules: '整段视频固定为一只橘色虎斑猫、一只灰褐色小老鼠、同一块浅棕木地板、同一只翻倒的蓝色线团、同一束右上方暖窗光; 猫的白胸口和铜色项圈牌、老鼠的粉色尾巴持续可见。',
       referenceUsage: referenceCount > 0
         ? `使用 ${referenceCount} 张参考图作为外观锚点,但仍保持“一只猫 + 一只小老鼠”的双主体关系,不要扩展成多只动物。`
       : '无参考图时,直接用文字锚定主体: 橘色虎斑猫、灰褐色小老鼠、客厅木地板、右上方暖窗光。'
@@ -1216,10 +1466,10 @@ function fallbackOverallPlan(input: CreateTaskInput, frameCount: number, motion:
   }
   if (isGiantHeroKaijuFightPrompt(input.prompt)) {
     return {
-      concept: `把“${input.prompt}”明确拍成一支 ${input.duration}s 的写实特摄电影感巨物战斗短片: 银红色巨型英雄与深灰色背鳍怪兽在夜晚城市废墟中对峙、能量交锋、近身碰撞并收束到光盾对抗咆哮的定格。`,
+      concept: `把“${input.prompt}”明确拍成一支 ${input.duration}s 的写实特摄电影感巨物战斗短片: 银红色巨型英雄与深灰色背鳍怪兽在夜晚城市废墟中对峙、能量交锋、近身碰撞并收束到光盾对抗咆哮的高潮画面。`,
       visualStyle: `${input.style ?? 'realistic'} 风格,城市尺度、烟尘、楼群、装甲反光、怪兽鳞甲和背鳍能量光都要具体可见,不要变成单主体海报。`,
-      cameraLanguage: `${motion} 镜头语言,${frameCount} 张每秒定格从城市中全景逐步推近到双方碰撞中心,只改变距离、裁切、局部姿态、烟尘和能量光强。`,
-      continuityRules: '每一帧都固定为一个银红色巨型英雄和一只深灰色背鳍发光怪兽,同一座夜晚城市废墟,同一条破损主街,同一组冷蓝月光与橙色火光; 两名主体必须同框。',
+      cameraLanguage: `${motion} 镜头语言,从城市中全景逐步推近到双方碰撞中心,只改变距离、裁切、局部姿态、烟尘和能量光强。`,
+      continuityRules: '整段视频固定为一个银红色巨型英雄和一只深灰色背鳍发光怪兽,同一座夜晚城市废墟,同一条破损主街,同一组冷蓝月光与橙色火光; 两名主体必须同框。',
       referenceUsage: referenceCount > 0
         ? `使用 ${referenceCount} 张参考图补充主体外观和材质,但仍保持“巨型英雄 + 怪兽”的双主体对战关系。`
         : '无参考图时,用文字锚定主体: 银红色巨型英雄、深灰色背鳍怪兽、夜晚城市废墟、蓝白能量光、橙色火光。'
@@ -1228,29 +1478,29 @@ function fallbackOverallPlan(input: CreateTaskInput, frameCount: number, motion:
   if (isConflictPrompt(input.prompt)) {
     const subjects = parsePromptSubjects(input.prompt);
     return {
-      concept: `把用户原始描述“${input.prompt}”润色为一支 ${input.duration}s 的连续双主体动作短片: ${subjects.a} 与 ${subjects.b} 在同一场景中从对峙、接近、交锋推进到一个清楚的收束定格,观众始终能看清两者的位置关系和动作因果。`,
+      concept: `把用户原始描述“${input.prompt}”润色为一支 ${input.duration}s 的连续双主体动作短片: ${subjects.a} 与 ${subjects.b} 在同一场景中从对峙、接近、交锋推进到一个清楚的收束画面,观众始终能看清两者的位置关系和动作因果。`,
       visualStyle: `${input.style ?? 'realistic'} 风格,画面以真实空间、明确主体轮廓、可辨认材质、统一光源和稳定背景为基础,避免单张海报感。`,
-      cameraLanguage: `${motion} 镜头语言,按用户选择的 ${frameCount} 秒拆成 ${frameCount} 张连续定格,每秒只推进一个动作节点或镜头变化。`,
-      continuityRules: `${subjects.a} 和 ${subjects.b} 必须每帧保持同一身份、同一外观、同一数量、同一场景和同一光源方向,不能忽然变成单主体、换背景或新增第三个主角。`,
+      cameraLanguage: `${motion} 镜头语言,在 ${input.duration}s 内连续推进动作节点和镜头变化。`,
+      continuityRules: `${subjects.a} 和 ${subjects.b} 必须全程保持同一身份、同一外观、同一数量、同一场景和同一光源方向,不能忽然变成单主体、换背景或新增第三个主角。`,
       referenceUsage: referenceCount > 0
         ? `使用 ${referenceCount} 张参考图补充主体外观、材质和场景信息,但仍按用户原始描述保持双主体动作关系。`
         : '无参考图时,先从用户描述里解析主体和动作关系,再用文字锚定主体身份、场景、光源和动作方向。'
     };
   }
   return {
-    concept: `把用户原始描述“${input.prompt}”润色为一支 ${input.duration}s 的连续短视频: 先建立主体、空间和主光方向,再通过 ${motion} 镜头运动逐秒推进主体姿态、裁切和视觉重点,最后停在清晰的记忆点。`,
+    concept: `把用户原始描述“${input.prompt}”润色为一支 ${input.duration}s 的连续短视频: 先建立主体、空间和主光方向,再通过 ${motion} 镜头运动推进主体姿态、裁切和视觉重点,最后停在清晰的记忆点。`,
     visualStyle: `${input.style ?? 'default'} 风格,画面需要有明确主体、具体场景、稳定光线、可辨认材质和连续的构图关系。`,
-    cameraLanguage: `${motion} 镜头语言,按用户选择的 ${frameCount} 秒拆成 ${frameCount} 张连续定格,每一帧都描述这一秒暂停时画面应该是什么样。`,
-    continuityRules: '所有关键帧必须保持同一主体身份、同一外观材质、同一场景、同一光线方向和一致的构图关系,只改变镜头距离、角度、局部姿态或运动节奏。',
+    cameraLanguage: `${motion} 镜头语言,在 ${input.duration}s 内连续推进镜头距离、角度、裁切和视觉焦点。`,
+    continuityRules: '整段视频保持同一主体身份、同一外观材质、同一场景、同一光线方向和一致的构图关系,只改变镜头距离、角度、局部姿态或运动节奏。',
     referenceUsage: referenceCount > 0
       ? `使用 ${referenceCount} 张参考图作为主体与材质锚点,第 1 张为主参考,其余参考只补充细节,不生成多个并列主体。`
-      : '无参考图时,以用户提示词建立主体锚点,后续帧通过重复主体描述保持一致性。'
+      : '无参考图时,以用户提示词建立主体锚点,整段视频通过重复主体描述保持一致性。'
   };
 }
 
 function fallbackAnimationDescription(input: CreateTaskInput, frameCount: number, motion: string): string {
   if (isCatMouseFightPrompt(input.prompt)) {
-    return `这是一段 ${input.duration}s 的连续写实动物动作短片: 开场在客厅木地板上建立一只橘色虎斑猫和一只灰褐色小老鼠的空间关系,猫伏低身体从画面左侧盯着右前方的小老鼠,老鼠背靠翻倒的蓝色线团做防御姿态; 中段镜头按 ${motion} 缓慢推进,猫伸爪、老鼠侧跳、两者围着同一个线团转圈,动作像喜剧式打闹而不是血腥搏斗; 后段镜头进入近景,重点落在猫的白胸口、铜色项圈牌、猫爪旁的小老鼠和木地板上的细小阴影,最后定格在猫爪停在老鼠前方、老鼠举起一小片奶酪反击的清晰画面。整段始终是同一只猫、同一只老鼠、同一客厅、同一束右上方窗光,看起来像一支连续镜头里的 ${frameCount} 个动作定格。`;
+    return `这是一段 ${input.duration}s 的连续写实动物动作短片: 开场在客厅木地板上建立一只橘色虎斑猫和一只灰褐色小老鼠的空间关系,猫伏低身体从画面左侧盯着右前方的小老鼠,老鼠背靠翻倒的蓝色线团做防御姿态; 中段镜头按 ${motion} 缓慢推进,猫伸爪、老鼠侧跳、两者围着同一个线团转圈,动作像喜剧式打闹而不是血腥搏斗; 后段镜头进入近景,重点落在猫的白胸口、铜色项圈牌、猫爪旁的小老鼠和木地板上的细小阴影,最后收束在猫爪停在老鼠前方、老鼠举起一小片奶酪反击的清晰画面。整段始终是同一只猫、同一只老鼠、同一客厅、同一束右上方窗光,看起来像一支连续镜头。`;
   }
   if (isGiantHeroKaijuFightPrompt(input.prompt)) {
     return `这是一段 ${input.duration}s 的连续写实特摄巨物战斗短片: 开场在夜晚城市废墟中建立银红色巨型英雄和深灰色背鳍怪兽的左右站位,破损楼群、街道汽车残骸、冷蓝月光和橙色火光提供尺度; 中段镜头按 ${motion} 缓慢推进,怪兽背鳍亮起并喷出蓝白能量吐息,巨型英雄侧身用前臂挡住冲击后向前冲近; 结尾进入近景,巨型英雄的蓝色胸前核心、金属装甲划痕、怪兽鳞甲和发光背鳍成为视觉焦点,最后定格在英雄光盾挡住怪兽咆哮的画面。整段始终保持同一个英雄、同一只怪兽、同一座夜晚城市废墟和同一套冷暖光线。`;
@@ -1259,48 +1509,48 @@ function fallbackAnimationDescription(input: CreateTaskInput, frameCount: number
     const subjects = parsePromptSubjects(input.prompt);
     return `这是一段 ${input.duration}s 的连续双主体动作短片: 开场先把“${input.prompt}”润色成清楚的画面关系,${subjects.a} 位于画面左侧或前景侧,${subjects.b} 位于画面右侧或中景侧,两者处在同一场景和同一束主光下; 随后镜头按 ${motion} 逐秒推进,双方从对峙到接近,再到一次明确的动作交锋,每一秒只改变距离、局部姿态、烟尘/光影或裁切; 结尾停在双方动作关系最清楚的一刻,让观众能一眼看懂谁和谁在发生什么,而不是看到几张互不相关的图片。`;
   }
-  return `这是一段 ${input.duration}s 的连续动画: 系统先把用户原始描述“${input.prompt}”润色成完整成片过程,明确主体、场景、主光方向、镜头运动和结尾记忆点; 开场建立主体与环境的关系,中段按 ${motion} 每秒推进一个具体画面变化,例如主体姿态、镜头距离、画面裁切、光影强弱或视觉焦点,结尾收束到清晰稳定的定格。整段必须像同一支连续镜头里的 ${frameCount} 个动作节点,而不是模板化说明或互不相关图片。`;
+    return `这是一段 ${input.duration}s 的连续动画: 系统先把用户原始描述“${input.prompt}”润色成完整成片过程,明确主体、场景、主光方向、镜头运动和结尾记忆点; 开场建立主体与环境的关系,中段按 ${motion} 推进具体画面变化,例如主体姿态、镜头距离、画面裁切、光影强弱或视觉焦点,结尾收束到清晰稳定的记忆画面。整段必须像同一支连续镜头,而不是模板化说明或互不相关图片。`;
 }
 
 function fallbackSmoothAnimation(input: CreateTaskInput, frameCount: number, motion: string): FramePlan['smoothAnimation'] {
   if (isCatMouseFightPrompt(input.prompt)) {
     return {
       durationSeconds: input.duration,
-      summary: `把“${input.prompt}”拆成 ${frameCount} 张连续动作定格: 猫和老鼠围绕同一个蓝色线团发生追逐、试探、扑爪、闪躲和定格反击,全程保持双主体同框。`,
-      motionArc: `${motion} 作为主运动,镜头从能看清客厅木地板和双方距离的中全景,逐秒推进到猫爪与老鼠表情的近景; 每秒只推进一个小动作,避免跳切。`,
-      timing: `0-${Math.max(1, Math.floor(frameCount * 0.2))} 秒建立猫鼠、线团、木地板和窗光; 中段让猫伸爪、老鼠闪躲、双方绕线团对峙; 最后 2-3 秒收束到猫爪停住、老鼠举奶酪反击的记忆点。`,
-      transitionLogic: '每一帧都继承上一帧的猫鼠位置关系和光线方向,只改变爪子高度、老鼠跳跃方向、尾巴弧线、线团滚动角度或镜头裁切。不要突然换场景、换动物数量、换成肖像照或抽象海报。',
-      continuityStrategy: '每条 Wan 提示词重复: exactly one ginger tabby cat, exactly one small gray-brown mouse, same living room wooden floor, same blue yarn ball, warm window light from upper right, no humans, no text。'
+      summary: `把“${input.prompt}”组织成一段连续动作: 猫和老鼠围绕同一个蓝色线团发生追逐、试探、扑爪、闪躲和反击,全程保持双主体同框。`,
+      motionArc: `${motion} 作为主运动,镜头从能看清客厅木地板和双方距离的中全景,顺滑推进到猫爪与老鼠表情的近景; 动作小幅连续,避免跳切。`,
+      timing: `开场建立猫鼠、线团、木地板和窗光; 中段让猫伸爪、老鼠闪躲、双方绕线团对峙; 最后收束到猫爪停住、老鼠举奶酪反击的记忆点。`,
+      transitionLogic: '镜头连续继承猫鼠位置关系和光线方向,只改变爪子高度、老鼠跳跃方向、尾巴弧线、线团滚动角度或镜头裁切。不要突然换场景、换动物数量、换成肖像照或抽象海报。',
+      continuityStrategy: 'Wan 视频提示词重复: exactly one ginger tabby cat, exactly one small gray-brown mouse, same living room wooden floor, same blue yarn ball, warm window light from upper right, no humans, no text。'
     };
   }
   if (isGiantHeroKaijuFightPrompt(input.prompt)) {
     return {
       durationSeconds: input.duration,
-      summary: `把“${input.prompt}”拆成 ${frameCount} 张连续巨物战斗定格: 建立城市废墟对峙,推进到能量吐息与防御,再收束到光盾对抗咆哮。`,
-      motionArc: `${motion} 作为主运动,从城市中全景逐秒推向双方碰撞中心; 每一秒只改变一个动作节点或能量光强,避免跳切和换主体。`,
-      timing: `0 秒建立双主体和城市尺度; 中段推进怪兽蓄能、吐息、英雄格挡和冲近; 最后 1-2 秒收束到英雄光盾和怪兽咆哮的记忆点。`,
-      transitionLogic: '每帧继承上一帧的英雄、怪兽、城市楼群、街道残骸、烟尘和光源方向,只改变双方姿态、距离、能量亮度或镜头裁切。',
-      continuityStrategy: '每条 Wan 提示词重复: one silver-red giant armored hero, one dark gray reptilian kaiju with glowing dorsal plates, same ruined night city, same blue moonlight and orange firelight, both subjects in the same frame。'
+      summary: `把“${input.prompt}”组织成连续巨物战斗: 建立城市废墟对峙,推进到能量吐息与防御,再收束到光盾对抗咆哮。`,
+      motionArc: `${motion} 作为主运动,从城市中全景顺滑推向双方碰撞中心; 只改变动作节点或能量光强,避免跳切和换主体。`,
+      timing: `开场建立双主体和城市尺度; 中段推进怪兽蓄能、吐息、英雄格挡和冲近; 结尾收束到英雄光盾和怪兽咆哮的记忆点。`,
+      transitionLogic: '连续继承英雄、怪兽、城市楼群、街道残骸、烟尘和光源方向,只改变双方姿态、距离、能量亮度或镜头裁切。',
+      continuityStrategy: 'Wan 视频提示词重复: one silver-red giant armored hero, one dark gray reptilian kaiju with glowing dorsal plates, same ruined night city, same blue moonlight and orange firelight, both subjects in the same frame。'
     };
   }
   if (isConflictPrompt(input.prompt)) {
     const subjects = parsePromptSubjects(input.prompt);
     return {
       durationSeconds: input.duration,
-      summary: `先把“${input.prompt}”润色成 ${subjects.a} 与 ${subjects.b} 的连续动作过程,再拆成 ${frameCount} 张每秒定格。`,
-      motionArc: `${motion} 作为主运动,从能看清两个主体和场景关系的画面,逐步推进到动作交锋中心和最终收束定格。`,
-      timing: `共 ${frameCount} 张关键帧: 开场建立双方和场景,中段推进接近与交锋,结尾停在动作关系最清楚的一帧。`,
-      transitionLogic: '每一帧必须从上一帧自然推进,只改变距离、姿态、裁切、烟尘/光影或动作张力,不能改主体身份、数量和背景。',
-      continuityStrategy: `每条 Wan 提示词重复 ${subjects.a}、${subjects.b}、同一场景、同一主光方向、同一背景参照物和双方同框关系。`
+      summary: `把“${input.prompt}”润色成 ${subjects.a} 与 ${subjects.b} 的连续动作过程。`,
+      motionArc: `${motion} 作为主运动,从能看清两个主体和场景关系的画面,逐步推进到动作交锋中心和最终收束画面。`,
+      timing: `开场建立双方和场景,中段推进接近与交锋,结尾停在动作关系最清楚的画面。`,
+      transitionLogic: '动作必须自然推进,只改变距离、姿态、裁切、烟尘/光影或动作张力,不能改主体身份、数量和背景。',
+      continuityStrategy: `Wan 视频提示词重复 ${subjects.a}、${subjects.b}、同一场景、同一主光方向、同一背景参照物和双方同框关系。`
     };
   }
   return {
     durationSeconds: input.duration,
-    summary: `先把用户描述“${input.prompt}”润色成完整动画过程,再拆成 ${frameCount} 张每秒定格: 开场建立主体和空间,中段推进具体变化,结尾收束到稳定记忆点。`,
-    motionArc: `${motion} 作为主运动,所有帧只做小幅、可插值的镜头距离/角度/裁切/光影变化,让 Wan 生成的关键帧能首尾串联。`,
-    timing: `共 ${frameCount} 张关键帧,第 0 秒建立画面,中段逐步强化主体细节和情绪,最后 1-2 秒收束到最有记忆点的画面。`,
-    transitionLogic: '每一帧都继承上一帧的主体、场景和光线,只推进一个明确变化点,避免跳切、换主体、换背景或突然新增元素。',
-    continuityStrategy: '在每条 Wan 提示词中重复主体身份、材质、主要颜色、构图位置、主光方向、背景关系和前后帧连续性锚点。'
+    summary: `先把用户描述“${input.prompt}”润色成完整动画过程: 开场建立主体和空间,中段推进具体变化,结尾收束到稳定记忆点。`,
+    motionArc: `${motion} 作为主运动,只做小幅、可插值的镜头距离/角度/裁切/光影变化,让 Wan 生成连续视频。`,
+    timing: `开场建立画面,中段逐步强化主体细节和情绪,最后收束到最有记忆点的画面。`,
+    transitionLogic: '整段视频继承主体、场景和光线,只推进明确变化点,避免跳切、换主体、换背景或突然新增元素。',
+    continuityStrategy: '在 Wan 视频提示词中重复主体身份、材质、主要颜色、构图位置、主光方向、背景关系和连续性锚点。'
   };
 }
 

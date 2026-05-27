@@ -2,29 +2,27 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FullTaskPayload, SerializedKeyframe, SerializedChat, SerializedTask } from '@/lib/api-types';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { FullTaskPayload, SerializedChat, SerializedTask } from '@/lib/api-types';
 
 type FullTask = FullTaskPayload;
 type Snapshot = FullTaskPayload;
-type Keyframe = SerializedKeyframe;
 type ChatMsg = SerializedChat;
-type FrameRuntimeMap = Record<string, {
-  startedAt?: number;
-  elapsedMs?: number;
-  step?: number;
-  maxSteps?: number;
-  attempt?: number;
-  maxAttempts?: number;
-  updatedAt: number;
-}>;
+type ProgressEntry = {
+  id: string;
+  ts: number;
+  title: string;
+  detail?: string;
+  progress?: number;
+  tone?: 'active' | 'done' | 'error' | 'muted';
+};
 
 const STAGE_LABEL: Record<string, string> = {
   pending: '排队中',
   planning: '规划中',
-  generating_keyframes: '生成关键帧',
-  generating_motion: '生成动画帧',
-  composing_video: '合成视频',
+  generating_keyframes: '生成视频',
+  generating_motion: '生成视频',
+  composing_video: '处理视频',
   completed: '已完成',
   failed: '失败',
   cancelled: '已取消'
@@ -39,18 +37,7 @@ export default function WorkspaceView({
 }) {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState<Snapshot>(initial);
-  const [selectedFrameId, setSelectedFrameId] = useState<string | null>(
-    initial.keyframes[0]?.id ?? null
-  );
-  const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
-  const [frameRuntime, setFrameRuntime] = useState<FrameRuntimeMap>({});
-  const [framePreviewOpen, setFramePreviewOpen] = useState(true);
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+  const [liveProgress, setLiveProgress] = useState<ProgressEntry[]>([]);
 
   // SSE 订阅
   useEffect(() => {
@@ -59,21 +46,8 @@ export default function WorkspaceView({
       try {
         const data = JSON.parse(ev.data);
         if (data.snapshot) setSnapshot(data.snapshot);
-        const payload = data.payload as Record<string, unknown> | undefined;
-        if (data.type === 'frame' && typeof payload?.frameId === 'string') {
-          setFrameRuntime(prev => ({
-            ...prev,
-            [payload.frameId as string]: {
-              startedAt: typeof payload.startedAt === 'number' ? payload.startedAt : prev[payload.frameId as string]?.startedAt,
-              elapsedMs: typeof payload.elapsedMs === 'number' ? payload.elapsedMs : prev[payload.frameId as string]?.elapsedMs,
-              step: typeof payload.step === 'number' ? payload.step : prev[payload.frameId as string]?.step,
-              maxSteps: typeof payload.maxSteps === 'number' ? payload.maxSteps : prev[payload.frameId as string]?.maxSteps,
-              attempt: typeof payload.attempt === 'number' ? payload.attempt : prev[payload.frameId as string]?.attempt,
-              maxAttempts: typeof payload.maxAttempts === 'number' ? payload.maxAttempts : prev[payload.frameId as string]?.maxAttempts,
-              updatedAt: Date.now()
-            }
-          }));
-        }
+        const entry = progressEntryFromEvent(data);
+        if (entry) setLiveProgress(prev => appendProgressEntry(prev, entry));
       } catch {
         /* */
       }
@@ -99,53 +73,10 @@ export default function WorkspaceView({
   }, [initial.task.id]);
 
   const task = snapshot.task;
-  const keyframes = snapshot.keyframes;
-  const selectedFrame = useMemo(
-    () => keyframes.find((k) => k.id === selectedFrameId) ?? keyframes[0] ?? null,
-    [keyframes, selectedFrameId]
+  const progressEntries = useMemo(
+    () => buildProgressEntries(snapshot, liveProgress),
+    [snapshot, liveProgress]
   );
-  const selectedFrameProgress = selectedFrame ? frameProgress(selectedFrame, frameRuntime, now) : null;
-
-  useEffect(() => {
-    if (!selectedFrame) return;
-    if (selectedFrame.status === 'generating' || selectedFrame.image_url || selectedFrame.thumbnail_url) {
-      setFramePreviewOpen(true);
-    }
-  }, [selectedFrame?.id, selectedFrame?.status, selectedFrame?.image_url, selectedFrame?.thumbnail_url]);
-
-  const onRegenerate = useCallback(
-    async (frameId: string, prompt?: string) => {
-      const r = await fetch(`/api/video-tasks/${task.id}/keyframes/${frameId}/regenerate`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(prompt ? { prompt } : {})
-      });
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        alert((j as { error?: string }).error || '重生成失败');
-        return;
-      }
-    },
-    [task.id]
-  );
-
-  const onToggleLock = useCallback(
-    async (frameId: string, lock: boolean) => {
-      const r = await fetch(`/api/video-tasks/${task.id}/keyframes/${frameId}/regenerate`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ lock })
-      });
-      if (!r.ok) {
-        alert('操作失败');
-        return;
-      }
-      const j = (await r.json()) as Snapshot;
-      setSnapshot(j);
-    },
-    [task.id]
-  );
-
   const onRetry = useCallback(async () => {
     const r = await fetch(`/api/video-tasks/${task.id}`, {
       method: 'PATCH',
@@ -168,12 +99,6 @@ export default function WorkspaceView({
     }
     const j = await r.json().catch(() => ({}));
     alert((j as { error?: string }).error || '取消任务失败');
-  }, [task.id]);
-
-  const onCompose = useCallback(async () => {
-    const r = await fetch(`/api/video-tasks/${task.id}/compose`, { method: 'POST' });
-    if (r.ok) setSnapshot((await r.json()) as Snapshot);
-    else alert((await r.json().catch(() => ({}))).error || '合成失败');
   }, [task.id]);
 
   const goPreview = () => router.push(`/preview/${task.id}`);
@@ -204,7 +129,7 @@ export default function WorkspaceView({
                   </span>
                 </div>
                 <div className="ws-task-meta">
-                  <span>{t.aspect_ratio} · {t.duration}s · {t.frame_count} 帧</span>
+                  <span>{t.aspect_ratio} · {t.duration}s · {t.fps}fps</span>
                   <span className="tab-num">{t.progress}%</span>
                 </div>
                 {isCancellableStatus(t.status) ? (
@@ -217,6 +142,7 @@ export default function WorkspaceView({
             </Link>
           ))}
         </div>
+
       </aside>
 
       {/* === Middle: chat stream === */}
@@ -250,7 +176,7 @@ export default function WorkspaceView({
           {/* User original */}
           <ChatItem
             role="user"
-            head={`你 · ${task.aspect_ratio} · ${task.duration}s · ${task.frame_count} 帧`}
+            head={`你 · ${task.aspect_ratio} · ${task.duration}s · ${task.fps}fps`}
             body={
               <>
                 <div>{task.prompt}</div>
@@ -266,34 +192,13 @@ export default function WorkspaceView({
             <ChatItemFromLog
               key={m.id}
               msg={m}
-              keyframes={keyframes}
-              motionType={task.motion_type}
-              onSelect={setSelectedFrameId}
-              selectedId={selectedFrame?.id ?? null}
             />
           ))}
-
-          {/* Frame grid summary card */}
-          {keyframes.length > 0 && (
-            <ChatItem
-              role="orchestrator"
-              head={`Frame Orchestrator · ${keyframes.length} 帧 · ${keyframes.filter(k => k.cache_hit).length} 命中缓存`}
-              body={
-                <FrameGrid
-                  keyframes={keyframes}
-                  runtime={frameRuntime}
-                  now={now}
-                  selectedId={selectedFrame?.id ?? null}
-                  onSelect={(id) => setSelectedFrameId(id)}
-                />
-              }
-            />
-          )}
 
           {task.status === 'completed' && task.video_url && (
             <ChatItem
               role="orchestrator"
-              head="Frame Orchestrator · 视频已合成"
+              head="Frame Orchestrator · 视频已生成"
               body={
                 <>
                   <video
@@ -329,7 +234,6 @@ export default function WorkspaceView({
           {task.status === 'completed' ? (
             <>
               <button className="btn btn-accent" onClick={goPreview}>预览视频</button>
-              <button className="btn" onClick={onCompose}>重新合成</button>
               <span style={{ flex: 1 }} />
               <Link className="btn btn-ghost btn-sm" href="/">回到创作台</Link>
             </>
@@ -353,161 +257,264 @@ export default function WorkspaceView({
               <button className="btn btn-danger" onClick={onCancelTask}>取消任务</button>
               <span style={{ flex: 1 }} />
               <span style={{ color: 'var(--muted)', fontSize: 12 }}>
-                可以选中右侧关键帧,等任务完成后点「重新生成此帧」
+                ComfyUI GGUF 正在生成整段视频
               </span>
             </>
           )}
         </div>
-
-        {keyframes.length > 1 && (
-          <div className="timeline">
-            {keyframes.map((k) => (
-              <button
-                key={k.id}
-                className={`timeline-cell${k.id === selectedFrame?.id ? ' is-selected' : ''}`}
-                onClick={() => setSelectedFrameId(k.id)}
-                title={`第 ${k.frame_index + 1} 帧`}
-              >
-                {k.thumbnail_url ? <img src={k.thumbnail_url} alt="" /> : null}
-              </button>
-            ))}
-          </div>
-        )}
       </section>
 
-      {/* === Right: frame inspector === */}
+      {/* === Right: video inspector === */}
       <aside className="ws-right">
         <div className="ws-right-head">
-          <h3>关键帧画板</h3>
+          <h3>视频信息</h3>
         </div>
-        {selectedFrame ? (
-          <>
-            <div className="ws-right-section">
-              <div className="ws-section-title-row">
-                <h4>第 {selectedFrame.frame_index + 1}/{keyframes.length} 帧</h4>
-                <button type="button" className="btn btn-sm btn-ghost" onClick={() => setFramePreviewOpen(open => !open)}>
-                  {framePreviewOpen ? '折叠图片' : '展开图片'}
-                </button>
-              </div>
-              {framePreviewOpen ? (
-                <div className="ws-frame-detail-thumb">
-                  {selectedFrame.thumbnail_url || selectedFrame.image_url ? (
-                    <img src={selectedFrame.image_url ?? selectedFrame.thumbnail_url ?? ''} alt="" />
-                  ) : (
-                    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>
-                      {selectedFrame.status === 'generating' ? '生成中…' : selectedFrame.status === 'failed' ? '生成失败' : '等待生成'}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <button type="button" className="ws-frame-collapsed" onClick={() => setFramePreviewOpen(true)}>
-                  <span className={`badge ${frameStatusBadge(selectedFrame.status, selectedFrame.cache_hit, !!selectedFrame.locked)}`}>
-                    <span className="badge-dot" />{frameStatusLabel(selectedFrame.status, selectedFrame.cache_hit, !!selectedFrame.locked)}
-                  </span>
-                  <span>{selectedFrame.thumbnail_url || selectedFrame.image_url ? '图片已生成,点击展开查看' : '图片区域已折叠'}</span>
-                </button>
-              )}
-              <div className="kv">
-                <div className="k">状态</div>
-                <div className="v text">
-                  <span className={`badge ${frameStatusBadge(selectedFrame.status, selectedFrame.cache_hit, !!selectedFrame.locked)}`}>
-                    <span className="badge-dot" />
-                    {frameStatusLabel(selectedFrame.status, selectedFrame.cache_hit, !!selectedFrame.locked)}
-                  </span>
-                </div>
-                <div className="k">seed</div>
-                <div className="v">#{selectedFrame.seed}</div>
-                <div className="k">缓存 key</div>
-                <div className="v" style={{ fontSize: 10.5 }}>{selectedFrame.cache_key.slice(0, 16)}…</div>
-                <div className="k">耗时</div>
-                <div className="v">{selectedFrameProgress ? formatElapsed(selectedFrameProgress.elapsedMs) : '—'}</div>
-                <div className="k">当前步骤</div>
-                <div className="v">{selectedFrameProgress?.stepText ?? '—'}</div>
-              </div>
-              <div className="frame-actions">
-                <button
-                  className="btn btn-sm"
-                  disabled={!!selectedFrame.locked || task.status !== 'completed'}
-                  onClick={() => setEditingFrameId(selectedFrame.id)}
-                >
-                  改提示词
-                </button>
-                <button
-                  className="btn btn-sm"
-                  disabled={!!selectedFrame.locked || task.status === 'pending' || task.status === 'planning'}
-                  onClick={() => onRegenerate(selectedFrame.id)}
-                >
-                  随机种子重生成
-                </button>
-                <button
-                  className="btn btn-sm"
-                  onClick={() => onToggleLock(selectedFrame.id, !selectedFrame.locked)}
-                >
-                  {selectedFrame.locked ? '解锁' : '锁定'}
-                </button>
-              </div>
-            </div>
-
-            <div className="ws-right-section">
-              <h4>单帧提示词</h4>
-              <p style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--fg-soft)' }}>
-                {selectedFrame.prompt}
-              </p>
-            </div>
-
-            <div className="ws-right-section">
-              <h4>Codex 绑定</h4>
-              <div className="kv">
-                <div className="k">App thread</div>
-                <div className="v">{task.codex_app_thread_id ? shortId(task.codex_app_thread_id) : '未绑定'}</div>
-                <div className="k">Exec thread</div>
-                <div className="v">{task.codex_exec_thread_id ? shortId(task.codex_exec_thread_id) : '待生成'}</div>
-                <div className="k">Model</div>
-                <div className="v">{task.codex_exec_model ?? 'fallback'}</div>
-              </div>
-            </div>
-
-            <div className="ws-right-section">
-              <h4>任务参数</h4>
-              <div className="kv">
-                <div className="k">比例</div>
-                <div className="v">{task.aspect_ratio}</div>
-                <div className="k">尺寸</div>
-                <div className="v">{task.width} × {task.height}</div>
-                <div className="k">时长</div>
-                <div className="v">{task.duration}s</div>
-                <div className="k">fps</div>
-                <div className="v">{task.fps}</div>
-                <div className="k">运动</div>
-                <div className="v">{task.motion_type}</div>
-                <div className="k">缓存</div>
-                <div className="v">{task.cache_keyframe_hits} / {task.frame_count} 帧</div>
-                <div className="k">视频缓存</div>
-                <div className="v">{task.cache_video_hit ? '命中' : '未命中'}</div>
-                <div className="k">节省成本</div>
-                <div className="v">¥{task.cost_saved.toFixed(2)}</div>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="ws-right-section">
-            <p style={{ color: 'var(--muted)', fontSize: 13 }}>等待第一帧生成…</p>
+        <div className="ws-right-section">
+          <h4>Codex 绑定</h4>
+          <div className="kv">
+            <div className="k">App thread</div>
+            <div className="v">{task.codex_app_thread_id ? shortId(task.codex_app_thread_id) : '未绑定'}</div>
+            <div className="k">Exec thread</div>
+            <div className="v">{task.codex_exec_thread_id ? shortId(task.codex_exec_thread_id) : '待生成'}</div>
+            <div className="k">Model</div>
+            <div className="v">{task.codex_exec_model ?? 'fallback'}</div>
           </div>
-        )}
+        </div>
+
+        <div className="ws-right-section">
+          <h4>任务参数</h4>
+          <div className="kv">
+            <div className="k">比例</div>
+            <div className="v">{task.aspect_ratio}</div>
+            <div className="k">尺寸</div>
+            <div className="v">{task.width} × {task.height}</div>
+            <div className="k">时长</div>
+            <div className="v">{task.duration}s</div>
+            <div className="k">fps</div>
+            <div className="v">{task.fps}</div>
+            <div className="k">运动</div>
+            <div className="v">{task.motion_type}</div>
+            <div className="k">视频缓存</div>
+            <div className="v">{task.cache_video_hit ? '命中' : '未命中'}</div>
+            <div className="k">节省成本</div>
+            <div className="v">¥{task.cost_saved.toFixed(2)}</div>
+          </div>
+        </div>
+
+        <ProgressPanel task={task} entries={progressEntries} />
       </aside>
 
-      {editingFrameId && selectedFrame && (
-        <FramePromptModal
-          frame={selectedFrame}
-          onCancel={() => setEditingFrameId(null)}
-          onSubmit={async (newPrompt) => {
-            setEditingFrameId(null);
-            await onRegenerate(selectedFrame.id, newPrompt);
-          }}
-        />
-      )}
     </div>
   );
+}
+
+function ProgressPanel({ task, entries }: { task: SerializedTask; entries: ProgressEntry[] }) {
+  return (
+    <div className="ws-right-section ws-progress-panel">
+      <div className="ws-section-title-row">
+        <h4>生成进度</h4>
+        <span className={`badge ${badgeClass(task.status)}`}>
+          <span className="badge-dot" />{task.progress}%
+        </span>
+      </div>
+      <div className="ws-progress-summary">
+        <div className="progress-track">
+          <div className="progress-bar" style={{ width: `${task.progress}%` }} />
+        </div>
+        <div className="ws-progress-current">{task.stage_message ?? STAGE_LABEL[task.status]}</div>
+      </div>
+      <div className="ws-progress-timeline">
+        {entries.map(entry => (
+          <div key={entry.id} className={`ws-progress-item tone-${entry.tone ?? 'muted'}`}>
+            <div className="ws-progress-dot" />
+            <div className="ws-progress-content">
+              <div className="ws-progress-row">
+                <strong>{entry.title}</strong>
+                <span>{formatClock(entry.ts)}</span>
+              </div>
+              {entry.detail ? <p>{entry.detail}</p> : null}
+              {typeof entry.progress === 'number' ? (
+                <div className="ws-progress-mini">
+                  <div style={{ width: `${Math.max(0, Math.min(100, entry.progress))}%` }} />
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function buildProgressEntries(snapshot: Snapshot, live: ProgressEntry[]): ProgressEntry[] {
+  const task = snapshot.task;
+  const base: ProgressEntry[] = [
+    {
+      id: `task-created-${task.id}`,
+      ts: parseDbTime(task.created_at),
+      title: '任务已创建',
+      detail: `${task.aspect_ratio} · ${task.width}×${task.height} · ${task.duration}s · ${task.fps}fps`,
+      progress: 0,
+      tone: 'done'
+    }
+  ];
+
+  for (const msg of snapshot.chat) {
+    const entry = progressEntryFromChat(msg);
+    if (entry) base.push(entry);
+  }
+
+  base.push({
+    id: `task-current-${task.id}-${task.status}-${task.progress}`,
+    ts: parseDbTime(task.updated_at),
+    title: statusTitle(task.status),
+    detail: task.error_message || task.stage_message || STAGE_LABEL[task.status],
+    progress: task.progress,
+    tone: task.status === 'failed' ? 'error' : task.status === 'completed' ? 'done' : 'active'
+  });
+
+  const byId = new Map<string, ProgressEntry>();
+  [...base, ...live].forEach(entry => byId.set(entry.id, entry));
+  return [...byId.values()]
+    .sort((a, b) => a.ts - b.ts)
+    .slice(-80);
+}
+
+function progressEntryFromChat(msg: ChatMsg): ProgressEntry | null {
+  const content = msg.content as Record<string, unknown> | string;
+  const ts = parseDbTime(msg.created_at);
+  if (msg.kind === 'plan') {
+    const source = typeof content === 'object' ? content.source as string | undefined : undefined;
+    return {
+      id: `chat-${msg.id}`,
+      ts,
+      title: 'Codex 规划完成',
+      detail: source ? `来源: ${source}` : undefined,
+      progress: 6,
+      tone: 'done'
+    };
+  }
+  if (msg.kind === 'note') {
+    const action = typeof content === 'object' ? content.action as string | undefined : undefined;
+    return {
+      id: `chat-${msg.id}`,
+      ts,
+      title: action === 'internal_prompt_translation' ? '视频提示词已生成' : '流程记录',
+      detail: typeof content === 'object' ? readableDetail(content.message) : readableDetail(content),
+      tone: 'done'
+    };
+  }
+  if (msg.kind === 'compose') {
+    const backend = typeof content === 'object' ? content.backend as string | undefined : undefined;
+    const cacheHit = typeof content === 'object' ? content.cache_hit as boolean | undefined : undefined;
+    return {
+      id: `chat-${msg.id}`,
+      ts,
+      title: '视频生成完成',
+      detail: `${backend ?? 'comfyui_gguf'} · ${cacheHit ? '命中缓存' : '新生成'}`,
+      progress: 100,
+      tone: 'done'
+    };
+  }
+  if (msg.kind === 'error') {
+    return {
+      id: `chat-${msg.id}`,
+      ts,
+      title: '生成失败',
+      detail: readableDetail(content),
+      tone: 'error'
+    };
+  }
+  return null;
+}
+
+function progressEntryFromEvent(data: unknown): ProgressEntry | null {
+  if (!data || typeof data !== 'object') return null;
+  const ev = data as { type?: string; payload?: unknown; ts?: number };
+  const payload = ev.payload && typeof ev.payload === 'object' ? ev.payload as Record<string, unknown> : {};
+  const ts = typeof ev.ts === 'number' ? ev.ts : Date.now();
+  const progress = typeof payload.progress === 'number' ? payload.progress : undefined;
+  const message = readableDetail(payload.message) || readableDetail(payload.node);
+  const id = `live-${ev.type ?? 'event'}-${ts}-${progress ?? ''}-${message}`;
+
+  if (ev.type === 'status' || ev.type === 'progress') {
+    return {
+      id,
+      ts,
+      title: message || '生成进度更新',
+      detail: progressNodeDetail(payload),
+      progress,
+      tone: 'active'
+    };
+  }
+  if (ev.type === 'log') {
+    return {
+      id,
+      ts,
+      title: logTitle(payload),
+      detail: readableDetail(payload.notes) || readableDetail(payload.source),
+      tone: 'done'
+    };
+  }
+  if (ev.type === 'completed') {
+    return { id, ts, title: '任务完成', detail: 'MP4 视频已生成', progress: 100, tone: 'done' };
+  }
+  if (ev.type === 'failed') {
+    return { id, ts, title: '任务失败', detail: readableDetail(payload.message), tone: 'error' };
+  }
+  return null;
+}
+
+function appendProgressEntry(prev: ProgressEntry[], entry: ProgressEntry): ProgressEntry[] {
+  if (prev.some(item => item.id === entry.id)) return prev;
+  return [...prev, entry].slice(-80);
+}
+
+function statusTitle(status: string): string {
+  if (status === 'planning') return '正在规划视频';
+  if (status === 'generating_motion' || status === 'generating_keyframes') return 'ComfyUI 正在生成视频';
+  if (status === 'composing_video') return '正在处理视频文件';
+  if (status === 'completed') return '任务已完成';
+  if (status === 'failed') return '任务失败';
+  if (status === 'cancelled') return '任务已取消';
+  return '等待开始';
+}
+
+function logTitle(payload: Record<string, unknown>): string {
+  if (payload.kind === 'plan') return '规划写入任务';
+  if (payload.kind === 'compose') return '合成记录';
+  return '流程日志';
+}
+
+function progressNodeDetail(payload: Record<string, unknown>): string | undefined {
+  const parts = [
+    readableDetail(payload.node),
+    readableDetail(payload.promptId) ? `prompt ${readableDetail(payload.promptId)}` : undefined,
+    typeof payload.elapsedMs === 'number' ? `${Math.round(payload.elapsedMs / 1000)}s` : undefined
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : undefined;
+}
+
+function readableDetail(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return undefined;
+}
+
+function formatClock(ts: number): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '--:--:--';
+  return d.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function parseDbTime(value: string): number {
+  if (!value) return Date.now();
+  const raw = value.trim();
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
+  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+  const ts = Date.parse(hasTimezone ? normalized : `${normalized}Z`);
+  return Number.isFinite(ts) ? ts : Date.now();
 }
 
 // ===== chat helpers =====
@@ -532,26 +539,15 @@ function ChatItem({
 }
 
 function ChatItemFromLog({
-  msg,
-  keyframes,
-  motionType,
-  onSelect,
-  selectedId
+  msg
 }: {
   msg: ChatMsg;
-  keyframes: Keyframe[];
-  motionType: string;
-  onSelect: (id: string) => void;
-  selectedId: string | null;
 }) {
   const c = msg.content as Record<string, unknown> | string;
   if (msg.kind === 'plan' && typeof c === 'object') {
-    const list = (c.framePrompts as string[]) || [];
     const overallPlan = c.overallPlan as Record<string, unknown> | undefined;
     const animationDescription = typeof c.animationDescription === 'string' ? c.animationDescription : '';
     const smoothAnimation = c.smoothAnimation as Record<string, unknown> | undefined;
-    const storyboard = Array.isArray(c.storyboard) ? c.storyboard as Array<Record<string, unknown>> : [];
-    const frameStills = Array.isArray(c.frameStills) ? c.frameStills as Array<Record<string, unknown>> : [];
     const agentSkills = Array.isArray(c.agentSkills) ? c.agentSkills as Array<Record<string, unknown>> : [];
     return (
       <ChatItem
@@ -599,61 +595,17 @@ function ChatItemFromLog({
                 {(c.model as string | null) ? ` · ${(c.model as string)}` : ''}
               </div>
             )}
-            <div className="storyboard-list">
-              {(storyboard.length ? storyboard : list.map((p, i) => ({ comfyPrompt: p, coreFrame: p, frameIndex: i, timeSec: i }))).map((item, i) => {
-                const p = String(item.comfyPrompt ?? list[i] ?? item.coreFrame ?? '');
-                const still = frameStills[i];
-                return (
-                <StoryboardCard
-                  key={`${i}-${p.slice(0, 16)}`}
-                  prompt={p}
-                  detail={item}
-                  still={still}
-                  index={i}
-                  frame={keyframes[i]}
-                  motionType={motionType}
-                  selected={keyframes[i]?.id === selectedId}
-                  onClick={() => {
-                    if (keyframes[i]) onSelect(keyframes[i].id);
-                  }}
-                />
-                );
-              })}
-            </div>
           </>
         }
       />
     );
   }
   if (msg.kind === 'frame_generation' && typeof c === 'object') {
-    const idx = c.frame_index as number;
-    const isHit = c.cache_hit as boolean;
     return (
       <ChatItem
         role={msg.role === 'user' ? 'user' : 'orchestrator'}
-        head={msg.role === 'user' ? '你 · 单帧操作' : 'Frame Orchestrator · 关键帧'}
-        body={
-          <>
-            <div>
-              第 <strong>{idx + 1}</strong> 帧
-              {' '}
-              {(c.action as string) === 'regenerate' ? (
-                <span className="badge badge-violet">重生成</span>
-              ) : isHit ? (
-                <span className="badge badge-accent">缓存命中</span>
-              ) : (
-                <span className="badge badge-success">新生成</span>
-              )}
-              {c.backend ? ` · backend: ${c.backend as string}` : ''}
-              {c.duration_ms ? ` · ${Math.round((c.duration_ms as number) / 100) / 10}s` : ''}
-            </div>
-            {(c.new_prompt as string) && (
-              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--fg-soft)' }}>
-                新提示词: {c.new_prompt as string}
-              </div>
-            )}
-          </>
-        }
+        head="Frame Orchestrator · 旧版单帧记录"
+        body={<div style={{ color: 'var(--muted)' }}>当前已切换为 ComfyUI GGUF 视频模式,不再使用单帧生成。</div>}
       />
     );
   }
@@ -667,7 +619,7 @@ function ChatItemFromLog({
             {(c.cache_hit as boolean) ? (
               <span className="badge badge-accent">视频缓存命中</span>
             ) : (
-              <span>FFmpeg 合成完成 · {(c.segments as number) ?? 0} 段 · {Math.round(((c.duration_ms as number) ?? 0) / 100) / 10}s</span>
+                <span>ComfyUI GGUF 视频完成 · {Math.round(((c.duration_ms as number) ?? 0) / 100) / 10}s</span>
             )}
           </div>
         }
@@ -687,195 +639,6 @@ function ChatItemFromLog({
   return null;
 }
 
-function StoryboardCard({
-  prompt,
-  detail,
-  still,
-  index,
-  frame,
-  motionType,
-  selected,
-  onClick
-}: {
-  prompt: string;
-  detail?: Record<string, unknown>;
-  still?: Record<string, unknown>;
-  index: number;
-  frame?: Keyframe;
-  motionType: string;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  const [open, setOpen] = useState(frame?.status === 'generating');
-  const prevStatus = useRef(frame?.status);
-
-  useEffect(() => {
-    if (frame?.status === 'generating' && prevStatus.current !== 'generating') {
-      setOpen(true);
-    }
-    if (selected) {
-      setOpen(true);
-    }
-    prevStatus.current = frame?.status;
-  }, [frame?.status, selected]);
-
-  const stillDescription = still?.stillDescription ? String(still.stillDescription) : detail?.coreFrame ? String(detail.coreFrame) : '';
-  const roleInAnimation = still?.roleInAnimation ? String(still.roleInAnimation) : detail?.subjectState ? String(detail.subjectState) : '';
-  const visualChange = still?.visualChange ? String(still.visualChange) : detail?.previousToCurrentChange ? String(detail.previousToCurrentChange) : '';
-  const cameraState = detail?.cameraState ? String(detail.cameraState) : '';
-  const timeSec = Number.isFinite(Number(detail?.timeSec)) ? Number(detail?.timeSec) : index;
-  const summaryText = stillDescription || prompt;
-  const collapsedText = summaryText.length > 72 ? `${summaryText.slice(0, 72)}…` : summaryText;
-
-  return (
-    <div className={`storyboard-card${selected ? ' is-selected' : ''}${open ? ' is-open' : ''}`}>
-      <button type="button" className="storyboard-toggle" onClick={onClick}>
-        <div className="storyboard-head">
-          <span className="badge badge-accent">分镜 {String(index + 1).padStart(2, '0')}</span>
-          <span className="badge">T+{timeSec}s</span>
-          <span className={`badge ${motionBadgeClass(motionType)}`}>{motionLabel(motionType)}</span>
-          {frame ? (
-            <span className={`badge ${frameStatusBadge(frame.status, frame.cache_hit, !!frame.locked)}`}>
-              <span className="badge-dot" />{frameStatusLabel(frame.status, frame.cache_hit, !!frame.locked)}
-            </span>
-          ) : null}
-        </div>
-        <div className="storyboard-copy">
-          {open ? (
-            <>
-              {stillDescription && <p><strong>定格画面:</strong> {stillDescription}</p>}
-              {roleInAnimation && <p><strong>这一帧的作用:</strong> {roleInAnimation}</p>}
-              {visualChange && <p><strong>相对上一帧:</strong> {visualChange}</p>}
-              {cameraState && <p><strong>镜头状态:</strong> {cameraState}</p>}
-            </>
-          ) : collapsedText}
-        </div>
-      </button>
-      <button
-        type="button"
-        className="storyboard-fold"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen(value => !value);
-        }}
-      >
-        {open ? '折叠' : '展开'}
-      </button>
-    </div>
-  );
-}
-
-function FrameGrid({
-  keyframes,
-  runtime,
-  now,
-  selectedId,
-  onSelect
-}: {
-  keyframes: Keyframe[];
-  runtime: FrameRuntimeMap;
-  now: number;
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <div className="frame-grid">
-      {keyframes.map((k) => {
-        const progress = frameProgress(k, runtime, now);
-        return (
-          <button
-            key={k.id}
-            type="button"
-            className={`frame-cell${k.id === selectedId ? ' is-selected' : ''}${k.status === 'generating' ? ' is-generating' : ''}${k.status === 'failed' ? ' is-failed' : ''}`}
-            onClick={() => onSelect(k.id)}
-            title={k.prompt}
-          >
-            <span className="frame-num">#{k.frame_index + 1}</span>
-            {k.cache_hit ? <span className="frame-tag badge badge-accent" style={{ height: 16, fontSize: 9.5, padding: '0 4px' }}>缓存</span> : null}
-            {k.locked ? <span className="frame-tag badge badge-warn" style={{ height: 16, fontSize: 9.5, padding: '0 4px' }}>锁</span> : null}
-            {k.thumbnail_url ? <img src={k.thumbnail_url} alt="" /> : null}
-            {progress ? (
-              <span className="frame-progress">
-                <span>{formatElapsed(progress.elapsedMs)}</span>
-                <span>{progress.stepText}</span>
-              </span>
-            ) : null}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function FramePromptModal({
-  frame,
-  onCancel,
-  onSubmit
-}: {
-  frame: Keyframe;
-  onCancel: () => void;
-  onSubmit: (newPrompt: string) => void;
-}) {
-  const [text, setText] = useState(frame.prompt);
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    ref.current?.focus();
-    ref.current?.select();
-  }, []);
-  return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>修改第 {frame.frame_index + 1} 帧提示词</h3>
-        <p className="modal-sub">提交后会用新的提示词 + 新随机种子重新生成此帧,不会影响其他帧。</p>
-        <textarea ref={ref} value={text} onChange={(e) => setText(e.target.value)} />
-        <div className="modal-actions">
-          <button className="btn" onClick={onCancel}>取消</button>
-          <button
-            className="btn btn-accent"
-            disabled={text.trim().length < 4}
-            onClick={() => onSubmit(text.trim())}
-          >
-            重新生成此帧
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function frameProgress(
-  frame: Keyframe,
-  runtime: FrameRuntimeMap,
-  now: number
-): { elapsedMs: number; stepText: string } | null {
-  if (frame.status === 'completed') {
-    return frame.duration_ms ? { elapsedMs: frame.duration_ms, stepText: '已完成' } : null;
-  }
-  if (frame.status !== 'generating') return null;
-
-  const live = runtime[frame.id];
-  const startedAt = live?.startedAt ?? parseDbUtc(frame.updated_at);
-  const elapsedMs = Math.max(0, live?.startedAt ? now - live.startedAt : now - startedAt);
-  const stepText =
-    live?.step && live.maxSteps
-      ? `第 ${live.step}/${live.maxSteps} 步`
-      : '等待步骤';
-  return { elapsedMs, stepText };
-}
-
-function parseDbUtc(value: string): number {
-  const parsed = Date.parse(`${value.replace(' ', 'T')}Z`);
-  return Number.isFinite(parsed) ? parsed : Date.now();
-}
-
-function formatElapsed(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  if (minutes <= 0) return `${seconds}s`;
-  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
-}
-
 function badgeClass(status: string): string {
   if (status === 'completed') return 'badge-success';
   if (status === 'failed' || status === 'cancelled') return 'badge-danger';
@@ -885,41 +648,6 @@ function badgeClass(status: string): string {
 
 function isCancellableStatus(status: string): boolean {
   return !['completed', 'failed', 'cancelled'].includes(status);
-}
-
-function frameStatusLabel(status: string, cacheHit: boolean, locked: boolean): string {
-  if (locked) return '已锁定';
-  if (status === 'completed') return cacheHit ? '缓存命中' : '已生成';
-  if (status === 'generating') return '生成中';
-  if (status === 'failed') return '失败';
-  if (status === 'pending') return '等待';
-  return status;
-}
-
-function frameStatusBadge(status: string, cacheHit: boolean, locked: boolean): string {
-  if (locked) return 'badge-warn';
-  if (status === 'completed') return cacheHit ? 'badge-accent' : 'badge-success';
-  if (status === 'generating') return 'badge-violet';
-  if (status === 'failed') return 'badge-danger';
-  return '';
-}
-
-function motionLabel(motion: string): string {
-  const labels: Record<string, string> = {
-    zoom_in: '运镜: 推近',
-    zoom_out: '运镜: 拉远',
-    pan_left: '运镜: 左移',
-    pan_right: '运镜: 右移',
-    fade: '运镜: 淡入淡出',
-    crossfade: '运镜: 交叉溶解'
-  };
-  return labels[motion] ?? `运镜: ${motion}`;
-}
-
-function motionBadgeClass(motion: string): string {
-  if (motion === 'fade' || motion === 'crossfade') return 'badge-warn';
-  if (motion === 'pan_left' || motion === 'pan_right') return 'badge-violet';
-  return 'badge-success';
 }
 
 function shortId(id: string): string {

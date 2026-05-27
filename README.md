@@ -2,44 +2,242 @@
 
 Frame is a local AI short-video workflow:
 
-1. Codex expands the user prompt into a video plan and per-second still descriptions.
-2. The backend calls a direct Wan Python worker.
-3. FFmpeg extracts preview keyframes and cover images from the generated video.
+1. Codex expands the user prompt into a video-level director plan.
+2. The backend sends the final prompt to a ComfyUI GGUF Wan workflow.
+3. FFmpeg transcodes the ComfyUI WebM output to MP4 and extracts a cover image.
 
-The runtime uses the Python worker directly instead of a visual workflow server.
+The project no longer uses the Diffusers `WanPipeline` worker. Wan generation is now routed through ComfyUI with fully quantized GGUF components.
 
-## Run
+## Requirements
+
+- Node.js 20+
+- FFmpeg, or the bundled `ffmpeg-static` package
+- Codex CLI, optional but recommended
+- ComfyUI running on `http://127.0.0.1:8188`
+- ComfyUI custom nodes:
+  - `calcuis/gguf`
+  - `ComfyUI-VideoHelperSuite` is optional for extra video utilities; the default workflow uses ComfyUI's built-in `SaveWEBM` node.
+- Wan GGUF model files placed in ComfyUI model folders.
+
+## Install App
 
 ```bash
 npm install
+copy .env.example .env.local
 npm run init-db
 npm run dev
 ```
 
 Open `http://localhost:3000`.
 
-## Direct Wan Backend
+## ComfyUI GGUF Models
 
-Configure `.env.local`:
+The default lightweight Wan setup uses these files from `calcuis/wan-1.3b-gguf`:
+
+```text
+wan2.1_t2v_1.3b-q2_k.gguf
+umt5-xxl-encoder-q4_k_m.gguf
+pig_wan_vae_fp32-f16.gguf
+```
+
+Download them into this project:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\download-wan-gguf.ps1
+```
+
+Then copy them into ComfyUI:
+
+```text
+ComfyUI/models/diffusion_models/wan2.1_t2v_1.3b-q2_k.gguf
+ComfyUI/models/text_encoders/umt5-xxl-encoder-q4_k_m.gguf
+ComfyUI/models/vae/pig_wan_vae_fp32-f16.gguf
+```
+
+Or let the helper script copy them:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\download-wan-gguf.ps1 -ComfyUIDir D:\path\to\ComfyUI
+```
+
+## Configuration
+
+`.env.local` controls the ComfyUI workflow:
 
 ```env
-WAN_PYTHON=python
-WAN_SCRIPT=./scripts/wan22-direct.py
-WAN_MODEL_ID=Wan-AI/Wan2.1-T2V-1.3B-Diffusers
-WAN_DEVICE=cuda
-WAN_VIDEO_FRAMES=81
+DATA_DIR=./data
+
+COMFYUI_URL=http://127.0.0.1:8188
+COMFYUI_WAN_MODEL=wan2.1_t2v_1.3b-q2_k.gguf
+COMFYUI_WAN_CLIP=umt5-xxl-encoder-q4_k_m.gguf
+COMFYUI_WAN_VAE=pig_wan_vae_fp32-f16.gguf
+COMFYUI_OUTPUT_PREFIX=frame-ai-video
+COMFYUI_OUTPUT_FPS=
+COMFYUI_POLL_TIMEOUT_MS=86400000
+COMFYUI_POLL_INTERVAL_MS=2000
+COMFYUI_REQUEST_TIMEOUT_MS=30000
+COMFYUI_STALL_TIMEOUT_MS=86400000
+COMFYUI_ALLOW_CPU=false
+COMFYUI_SAMPLER=uni_pc
+COMFYUI_SCHEDULER=simple
+COMFYUI_WEBM_CODEC=vp9
+COMFYUI_WEBM_CRF=32
+
+WAN_VIDEO_FRAMES=121
+WAN_WIDTH=
+WAN_HEIGHT=
+WAN_STEPS=8
+WAN_GUIDANCE_SCALE=5.5
+WAN_NEGATIVE=lowres, blurry, watermark, text, deformed, bad anatomy, bad motion, flicker
+
+CODEX_BIN=codex
+CODEX_MODEL=
+CODEX_PLAN_TIMEOUT_MS=300000
+CODEX_TRANSLATE_TIMEOUT_MS=300000
+CODEX_CHAT_TIMEOUT_MS=300000
+CODEX_THREAD_ID=
+
+FFMPEG_BIN=
+FFMPEG_MOTION_INTENSITY=1.35
+
+NEXT_PUBLIC_APP_NAME=Frame
 ```
 
-The Python environment must provide:
+`WAN_WIDTH` and `WAN_HEIGHT` are intentionally blank by default; the ComfyUI workflow uses the task size selected in the UI. `COMFYUI_OUTPUT_FPS` is also blank by default so the output duration is derived from `WAN_VIDEO_FRAMES / task duration`. `COMFYUI_POLL_TIMEOUT_MS` and `COMFYUI_STALL_TIMEOUT_MS` are set to 24 hours for slow CPU-only Wan runs.
+
+For better quality, replace `COMFYUI_WAN_MODEL` with a larger GGUF such as `wan2.1_t2v_1.3b-q3_k_m.gguf` or `wan2.1_t2v_1.3b-q4_0.gguf`, then place that file in `ComfyUI/models/diffusion_models`.
+
+Deployment notes for important variables:
+
+- `COMFYUI_ALLOW_CPU=false` blocks CPU-only ComfyUI because Wan generation can run for many hours. Set it to `true` only when you intentionally want to run on CPU.
+- `COMFYUI_POLL_TIMEOUT_MS` is the whole ComfyUI job wait limit. `COMFYUI_STALL_TIMEOUT_MS` is the no-sampler-progress limit. Both default to 24 hours in this project.
+- `CODEX_THREAD_ID` lets the app bind to a stable Codex conversation for the built-in Codex chat page. Leave it blank to let the app create and store task-level session ids.
+- `DATA_DIR` contains SQLite data, uploads, generated videos, cache files, and logs. Back it up before redeploying or moving machines.
+- `FFMPEG_BIN` can be left blank when `ffmpeg-static` works. Set it to an absolute FFmpeg executable path if deployment cannot find FFmpeg.
+
+## Start ComfyUI
+
+Start ComfyUI separately before creating tasks:
 
 ```bash
-pip install torch diffusers transformers accelerate imageio-ffmpeg
+python main.py --listen 127.0.0.1 --port 8188 --cpu
 ```
 
-Use a CUDA-enabled PyTorch build for practical generation speed.
+For GPU deployment, install a CUDA-enabled PyTorch build for ComfyUI and start without `--cpu`:
 
-## Notes
+```bash
+python main.py --listen 127.0.0.1 --port 8188
+```
 
-- Existing task planning and preview pages are preserved.
-- Keyframe images are extracted from the generated video, not generated one-by-one.
-- `WAN_MODEL_ID` can be changed to another Diffusers-compatible Wan model when the local hardware can support it.
+If you keep `--cpu`, set this in `.env.local` before starting the Next.js service:
+
+```env
+COMFYUI_ALLOW_CPU=true
+```
+
+The app checks ComfyUI through:
+
+```text
+GET /api/health
+```
+
+The health check verifies that:
+
+- ComfyUI is reachable
+- `LoaderGGUF`, `ClipLoaderGGUF`, `VaeGGUF`, `EmptyHunyuanLatentVideo`, `KSampler`, and `SaveWEBM` nodes exist
+- the configured model, clip, and VAE filenames appear in ComfyUI's node model lists
+
+## Workflow Notes
+
+- The app builds the ComfyUI API prompt internally.
+- ComfyUI saves a WebM file; the app downloads it and transcodes it to MP4.
+- Reference images are still accepted by the UI and Codex planner, but the default lightweight T2V GGUF workflow is text-to-video. Image-conditioned Wan/VACE can be added later with a separate ComfyUI workflow.
+- Codex planning and Codex chat use the configured `CODEX_BIN`; if Codex is unavailable, planning falls back to deterministic local text.
+- The legacy Diffusers `WanPipeline` and direct Python Wan worker are no longer part of the runtime.
+- Generated files live under `data/storage/<taskId>`.
+- Cache files live under `data/cache`.
+- Application logs live in `data/app.log`.
+
+## Deployment
+
+The deployed runtime has two long-running services:
+
+1. ComfyUI performs Wan GGUF inference.
+2. Next.js orchestrates planning, task state, ComfyUI calls, FFmpeg conversion, previews, and the Codex chat UI.
+
+### 1. Prepare the App
+
+```bash
+npm install
+copy .env.example .env.local
+npm run init-db
+```
+
+Edit `.env.local` before starting the service. At minimum confirm:
+
+- `COMFYUI_URL` points to the ComfyUI server.
+- `COMFYUI_WAN_MODEL`, `COMFYUI_WAN_CLIP`, and `COMFYUI_WAN_VAE` match the filenames inside ComfyUI.
+- `COMFYUI_ALLOW_CPU=true` only if ComfyUI is intentionally running in CPU mode.
+- `CODEX_BIN=codex` if Codex planning and the Codex chat page should call the real Codex CLI.
+- `DATA_DIR` points to a persistent directory.
+
+### 2. Prepare ComfyUI
+
+Install the GGUF custom node in ComfyUI, then place the model files here:
+
+```text
+ComfyUI/models/diffusion_models/wan2.1_t2v_1.3b-q2_k.gguf
+ComfyUI/models/text_encoders/umt5-xxl-encoder-q4_k_m.gguf
+ComfyUI/models/vae/pig_wan_vae_fp32-f16.gguf
+```
+
+Start ComfyUI:
+
+```bash
+python main.py --listen 127.0.0.1 --port 8188
+```
+
+CPU-only fallback:
+
+```bash
+python main.py --listen 127.0.0.1 --port 8188 --cpu
+```
+
+When using CPU-only fallback, keep `COMFYUI_ALLOW_CPU=true` and keep the 24-hour poll/stall timeouts.
+
+### 3. Start Next.js
+
+For development:
+
+```bash
+npm run dev
+```
+
+For production:
+
+```bash
+npm run build
+npm run start
+```
+
+Open `http://localhost:3000`.
+
+### 4. Verify Deployment
+
+Check the health endpoint after both services are running:
+
+```text
+GET http://localhost:3000/api/health
+```
+
+Expected state:
+
+- `wan.configured=true`
+- `wan.ready=true`
+- `wan.backend="comfyui-gguf"`
+- `ffmpeg.ok=true`
+- `codex.configured=true` when `CODEX_BIN` is set
+
+If `.env.local` changes, restart the Next.js service. Running tasks keep the environment that was loaded when that task started, so retry failed tasks after restarting.
+
+Keep ComfyUI running in another terminal or as a background service. The Next.js service only orchestrates tasks; ComfyUI performs Wan inference.

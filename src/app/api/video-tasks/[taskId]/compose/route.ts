@@ -1,19 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { fullTask, jsonError } from '@/lib/api-helpers';
-import { composeForTask } from '@/lib/orchestrator';
-import { getTask } from '@/lib/repo';
+import { NextRequest } from 'next/server';
+import { jsonError } from '@/lib/api-helpers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ taskId: string }> }) {
-  const { taskId } = await params;
-  const t = getTask(taskId);
-  if (!t) return jsonError(404, '任务不存在');
-  try {
-    await composeForTask(taskId);
-  } catch (e) {
-    return jsonError(500, (e as Error).message);
-  }
-  return NextResponse.json(fullTask(taskId, getTask(taskId)!));
+  await params;
+  return jsonError(410, '当前已切换为 ComfyUI GGUF 视频模式,不再支持图片合成视频');
 }

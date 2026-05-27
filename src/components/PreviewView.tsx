@@ -74,13 +74,6 @@ export default function PreviewView({ initial }: { initial: FullTask }) {
     setSpeedIdx(next);
   }, [speedIdx]);
 
-  const jumpToFrame = useCallback((idx: number) => {
-    const total = duration || videoRef.current?.duration || snapshot.task.duration;
-    const N = snapshot.keyframes.length;
-    if (N === 0) return;
-    seek((idx / N) * total);
-  }, [duration, snapshot.keyframes.length, snapshot.task.duration, seek]);
-
   const t = snapshot.task;
   const ratioClass = t.aspect_ratio === '9:16' ? 'r-9-16' : t.aspect_ratio === '1:1' ? 'r-1-1' : '';
   const reuse = () => {
@@ -89,7 +82,6 @@ export default function PreviewView({ initial }: { initial: FullTask }) {
       ratio: t.aspect_ratio,
       duration: String(t.duration),
       motion: t.motion_type,
-      frames: String(t.frame_count)
     });
     router.push(`/?${params.toString()}`);
   };
@@ -106,7 +98,6 @@ export default function PreviewView({ initial }: { initial: FullTask }) {
               <span>运动: {t.motion_type}</span>
               <span>seed: <span className="mono">#{t.seed}</span></span>
               {t.cache_video_hit && <span className="badge badge-accent">视频缓存命中</span>}
-              {t.cache_keyframe_hits > 0 && <span className="badge badge-accent">关键帧缓存 {t.cache_keyframe_hits}/{t.frame_count}</span>}
             </div>
           </div>
           <div className="pv-head-actions">
@@ -117,7 +108,7 @@ export default function PreviewView({ initial }: { initial: FullTask }) {
           </div>
         </header>
 
-        {/* === Player + controls + keyframes timeline === */}
+        {/* === Player + controls === */}
         <div>
           <div className={`pv-player-wrap ${ratioClass}`}>
             {t.video_url ? (
@@ -172,16 +163,6 @@ export default function PreviewView({ initial }: { initial: FullTask }) {
             </button>
           </div>
 
-          {snapshot.keyframes.length > 0 && (
-            <div className="pv-keyframes" style={{ marginTop: 16 }}>
-              {snapshot.keyframes.map((k) => (
-                <button key={k.id} type="button" className="pv-kf" onClick={() => jumpToFrame(k.frame_index)} title={k.prompt}>
-                  <span className="label">#{k.frame_index + 1}</span>
-                  {k.thumbnail_url ? <img src={k.thumbnail_url} alt="" /> : null}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* === Side panels === */}
@@ -199,7 +180,6 @@ export default function PreviewView({ initial }: { initial: FullTask }) {
               <div className="k">尺寸</div><div className="v">{t.width} × {t.height}</div>
               <div className="k">时长</div><div className="v">{t.duration}s</div>
               <div className="k">fps</div><div className="v">{t.fps}</div>
-              <div className="k">关键帧数</div><div className="v">{t.frame_count}</div>
               <div className="k">运动</div><div className="v">{t.motion_type}</div>
               <div className="k">seed</div><div className="v">#{t.seed}</div>
             </div>
@@ -208,8 +188,6 @@ export default function PreviewView({ initial }: { initial: FullTask }) {
           <div className="pv-card">
             <h4>缓存命中</h4>
             <div className="kv">
-              <div className="k">关键帧</div>
-              <div className="v">{t.cache_keyframe_hits} / {t.frame_count}</div>
               <div className="k">视频</div>
               <div className="v">{t.cache_video_hit ? '命中' : '未命中'}</div>
               <div className="k">估算成本</div>
@@ -223,7 +201,7 @@ export default function PreviewView({ initial }: { initial: FullTask }) {
             <h4>动作</h4>
             <div className="pv-cta-row">
               <button className="btn btn-accent" onClick={reuse}>复用参数 → 创作台</button>
-              <Link className="btn" href={`/workspace/${t.id}`}>微调单帧</Link>
+              <Link className="btn" href={`/workspace/${t.id}`}>查看任务</Link>
               {t.video_url && (
                 <a className="btn" href={t.video_url} download={`frame-${t.id}.mp4`}>下载 mp4</a>
               )}

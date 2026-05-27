@@ -112,6 +112,7 @@
   grid-template-columns: 0.9fr 1.1fr;
   gap: 14px;
   padding: 12px;
+  align-items: start;
 }
 .plan-preview h4 {
   margin: 0 0 8px;
@@ -128,8 +129,6 @@
 .plan-preview ol {
   margin: 0;
   padding-left: 18px;
-  max-height: 320px;
-  overflow: auto;
 }
 .plan-preview li {
   margin-bottom: 8px;
@@ -137,6 +136,7 @@
   line-height: 1.55;
   color: var(--fg-soft);
 }
+.plan-preview li:last-child { margin-bottom: 0; }
 .agent-strip {
   display: flex; gap: 6px; flex-wrap: wrap;
   padding: 0 12px 12px;
