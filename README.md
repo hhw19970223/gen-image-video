@@ -19,6 +19,106 @@ The project no longer uses the Diffusers `WanPipeline` worker. Wan generation is
   - `ComfyUI-VideoHelperSuite` is optional for extra video utilities; the default workflow uses ComfyUI's built-in `SaveWEBM` node.
 - Wan GGUF model files placed in ComfyUI model folders.
 
+## Install ComfyUI
+
+This app does not bundle ComfyUI. Install and run ComfyUI as a separate service, then point `COMFYUI_URL` to it.
+
+### Option A: Windows Portable
+
+For Windows, the portable package is the simplest setup:
+
+1. Download the ComfyUI Windows portable package from the official ComfyUI release/download page.
+2. Extract it, for example to `D:\agent\ComfyUI`.
+3. Start GPU mode with `run_nvidia_gpu.bat`, or CPU mode with `run_cpu.bat`.
+4. Open `http://127.0.0.1:8188` and confirm the ComfyUI page loads.
+
+If the portable bat file uses a different host or port, edit the bat file and add:
+
+```bat
+--listen 127.0.0.1 --port 8188
+```
+
+### Option B: Manual Git Install
+
+Manual install is useful when you want full control over Python, CUDA, or custom nodes:
+
+```powershell
+git clone https://github.com/Comfy-Org/ComfyUI.git D:\agent\ComfyUI
+cd D:\agent\ComfyUI
+python -m venv .venv
+.\.venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+Start with GPU:
+
+```powershell
+python main.py --listen 127.0.0.1 --port 8188
+```
+
+Start with CPU:
+
+```powershell
+python main.py --listen 127.0.0.1 --port 8188 --cpu
+```
+
+CPU mode is supported only when this app has `COMFYUI_ALLOW_CPU=true`.
+
+## Install ComfyUI GGUF Node
+
+The current workflow requires GGUF loader nodes. The health check expects these ComfyUI node classes:
+
+```text
+LoaderGGUF
+ClipLoaderGGUF
+VaeGGUF
+EmptyHunyuanLatentVideo
+KSampler
+SaveWEBM
+```
+
+Install the `calcuis/gguf` custom node into ComfyUI:
+
+```powershell
+cd D:\agent\ComfyUI\custom_nodes
+git clone https://github.com/calcuis/gguf.git
+```
+
+Then restart ComfyUI. After restart, run this app's health check:
+
+```text
+GET http://localhost:3000/api/health
+```
+
+If the response says ComfyUI is missing `LoaderGGUF`, `ClipLoaderGGUF`, or `VaeGGUF`, the GGUF node is not installed correctly or ComfyUI was not restarted.
+
+## Checkpoints and GGUF Models
+
+In ComfyUI, "checkpoint" usually means a Stable Diffusion or SDXL `.safetensors` / `.ckpt` model placed in:
+
+```text
+ComfyUI/models/checkpoints
+```
+
+This project does not currently use a normal SD/SDXL checkpoint. It uses a Wan video GGUF workflow instead:
+
+```text
+ComfyUI/models/diffusion_models/wan2.1_t2v_1.3b-q2_k.gguf
+ComfyUI/models/text_encoders/umt5-xxl-encoder-q4_k_m.gguf
+ComfyUI/models/vae/pig_wan_vae_fp32-f16.gguf
+```
+
+So there is no `COMFYUI_CHECKPOINT` setting in `.env.local`. The equivalent model settings for this project are:
+
+```env
+COMFYUI_WAN_MODEL=wan2.1_t2v_1.3b-q2_k.gguf
+COMFYUI_WAN_CLIP=umt5-xxl-encoder-q4_k_m.gguf
+COMFYUI_WAN_VAE=pig_wan_vae_fp32-f16.gguf
+```
+
+If you later add a Stable Diffusion image workflow, put the SD/SDXL checkpoint in `ComfyUI/models/checkpoints` and add a separate ComfyUI workflow/adapter for that pipeline.
+
 ## Install App
 
 ```bash
@@ -30,7 +130,7 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-## ComfyUI GGUF Models
+## Wan GGUF Model Files
 
 The default lightweight Wan setup uses these files from `calcuis/wan-1.3b-gguf`:
 
