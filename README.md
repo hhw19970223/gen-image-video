@@ -29,6 +29,26 @@ vendor/ComfyUI
 
 Keep ComfyUI in this folder so the app, model files, startup scripts, and logs stay under one deployable project directory.
 
+## Local Assets and Git
+
+The repository intentionally does not commit runtime-heavy or machine-specific assets:
+
+```text
+.env.local
+vendor/
+models/
+data/
+```
+
+Set these up on each machine during deployment:
+
+- Copy `.env.example` to `.env.local` and edit local paths, CPU/GPU mode, Codex settings, and timeouts.
+- Install or move ComfyUI into `vendor/ComfyUI`.
+- Download Wan GGUF model files into `models/` as a local cache, then copy them into `vendor/ComfyUI/models/...`.
+- Keep generated videos, SQLite data, cache files, and logs under `data/`.
+
+Do not push GGUF model files to GitHub. They are multi-GB binaries and should be downloaded during deployment or stored in a model artifact store.
+
 ### Option A: Windows Portable
 
 For Windows, the portable package is the simplest setup:
@@ -146,6 +166,8 @@ Download them into this project:
 powershell -ExecutionPolicy Bypass -File scripts\download-wan-gguf.ps1
 ```
 
+This stores a local copy under `models/wan-gguf`. The `models/` folder is ignored by Git.
+
 Then copy them into ComfyUI:
 
 ```text
@@ -158,6 +180,14 @@ Or let the helper script copy them:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\download-wan-gguf.ps1 -ComfyUIDir .\vendor\ComfyUI
+```
+
+After copying, the deployment-critical model files should exist at:
+
+```text
+vendor/ComfyUI/models/diffusion_models/wan2.1_t2v_1.3b-q2_k.gguf
+vendor/ComfyUI/models/text_encoders/umt5-xxl-encoder-q4_k_m.gguf
+vendor/ComfyUI/models/vae/pig_wan_vae_fp32-f16.gguf
 ```
 
 ## Configuration
@@ -289,6 +319,8 @@ Edit `.env.local` before starting the service. At minimum confirm:
 - `COMFYUI_ALLOW_CPU=true` only if ComfyUI is intentionally running in CPU mode.
 - `CODEX_BIN=codex` if Codex planning and the Codex chat page should call the real Codex CLI.
 - `DATA_DIR` points to a persistent directory.
+
+`.env.local`, `models/`, `vendor/`, and `data/` are local deployment assets and are ignored by Git. Recreate or restore them on every deployment target before starting the services.
 
 ### 2. Prepare ComfyUI
 

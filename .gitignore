@@ -4,10 +4,9 @@ out/
 data/
 vendor/
 models/
-.venv-wan-cpu/
-*.log
 .env
 .env.local
+*.log
 .DS_Store
 next-env.d.ts
 tsconfig.tsbuildinfo
